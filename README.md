@@ -7,7 +7,7 @@ A framework for building software systems from declarative specifications — no
 You don't write code. You write **axioms** — plain-language statements that define what your system does. An AI-powered sync process reads your axioms and generates (or updates) the codebase to match. When requirements change, you edit the axioms and re-sync. The code follows.
 
 ```
-axioms/  ← you work here (source of truth)
+/  ← you work here (source of truth)
 _generated/  ← generated code (derived artifact)
 ```
 
