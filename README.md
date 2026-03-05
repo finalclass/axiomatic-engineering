@@ -25,6 +25,14 @@ Software architects who understand that the hard part of building systems is not
 
 If you think AI is a better autocomplete for writing loops, this framework is not for you. If you think AI can take over the translation from specification to code while humans focus on specification, design, and verification — read on.
 
+## Relation to Spec-Driven Development
+
+Axiomatic Engineering is related to what the industry calls [Spec-Driven Development](https://www.speakeasy.com/post/spec-driven-development) — the practice of writing a formal specification first and deriving implementation from it. SDD typically means an API spec (OpenAPI, GraphQL schema) that drives code generation and contract testing.
+
+Axiomatic Engineering takes this further. The specification isn't just a contract — it's the **source of truth** that replaces hand-written code entirely. Axioms are not limited to API shapes; they describe business logic, UI behavior, security constraints, and regulatory requirements — all in plain language, all generating code through the same sync process. And every line of generated code traces back to the axiom that requires it, with a layered verification system (`[test]`, `[security]`, `[e2e]`) that ensures each axiom is not just implemented but *proven* compliant.
+
+Where SDD stops at "spec first, then code", Axiomatic Engineering says: spec *is* the codebase.
+
 ## Design principles
 
 **Specification is the product.** Code is derived. If your axioms are precise and complete, the generated code is correct. If the code has a bug, the axiom is incomplete — you fix the axiom, not the code.
