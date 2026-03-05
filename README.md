@@ -27,7 +27,7 @@ If you think AI is a better autocomplete for writing loops, this framework is no
 
 ## Relation to Spec-Driven Development
 
-Axiomatic Engineering is related to what the industry calls [Spec-Driven Development](https://www.speakeasy.com/post/spec-driven-development) — the practice of writing a formal specification first and deriving implementation from it. SDD typically means an API spec (OpenAPI, GraphQL schema) that drives code generation and contract testing.
+Axiomatic Engineering is related to what the industry calls [Spec-Driven Development](https://en.wikipedia.org/wiki/Spec-driven_development) — the practice of writing a formal specification first and deriving implementation from it. SDD typically means an API spec (OpenAPI, GraphQL schema) that drives code generation and contract testing.
 
 Axiomatic Engineering takes this further. The specification isn't just a contract — it's the **source of truth** that replaces hand-written code entirely. Axioms are not limited to API shapes; they describe business logic, UI behavior, security constraints, and regulatory requirements — all in plain language, all generating code through the same sync process. And every line of generated code traces back to the axiom that requires it, with a layered verification system (`[test]`, `[security]`, `[e2e]`) that ensures each axiom is not just implemented but *proven* compliant.
 
