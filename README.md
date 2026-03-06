@@ -25,14 +25,6 @@ Software architects who understand that the hard part of building systems is not
 
 If you think AI is a better autocomplete for writing loops, this framework is not for you. If you think AI can take over the translation from specification to code while humans focus on specification, design, and verification — read on.
 
-## Relation to Spec-Driven Development
-
-Axiomatic Engineering is related to what the industry calls [Spec-Driven Development](https://en.wikipedia.org/wiki/Spec-driven_development) — the practice of writing a formal specification first and deriving implementation from it. SDD typically means an API spec (OpenAPI, GraphQL schema) that drives code generation and contract testing.
-
-Axiomatic Engineering takes this further. The specification isn't just a contract — it's the **source of truth** that replaces hand-written code entirely. Axioms are not limited to API shapes; they describe business logic, UI behavior, security constraints, and regulatory requirements — all in plain language, all generating code through the same sync process. And every line of generated code traces back to the axiom that requires it, with a layered verification system (`[test]`, `[security]`, `[e2e]`) that ensures each axiom is not just implemented but *proven* compliant.
-
-Where SDD stops at "spec first, then code", Axiomatic Engineering says: spec *is* the codebase.
-
 ## Design principles
 
 **Specification is the product.** Code is derived. If your axioms are precise and complete, the generated code is correct. If the code has a bug, the axiom is incomplete — you fix the axiom, not the code.
@@ -59,147 +51,98 @@ When that happens, regulations will look like axioms: formalized rules that a sy
 
 Axiomatic Engineering is designed with this future in mind.
 
-## How it works
+## Relation to Spec-Driven Development
 
-### Project layout
+Axiomatic Engineering is related to what the industry calls Spec-Driven Development (SDD). In mid-2025, major players entered this space: Amazon launched Kiro (a spec-first IDE), GitHub released spec-kit (an open-source SDD toolkit), and Tessl launched a spec-driven framework. Birgitta Böckeler from Thoughtworks analyzed these tools and identified three levels of SDD: spec-first (specification written before code, then abandoned), spec-anchored (specification maintained alongside code), and spec-as-source (specification is the only artifact edited by humans — code is a derived build artifact).
 
-```
-axioms.md                  ← main axiom file (entry point)
-technology.md              ← technology decisions
-data-protection.md         ← regulatory/privacy axioms
-ui-template.html           ← UI reference template
-landing-client/            ← axioms per client (IDesign decomposition)
-_generated/                ← all code lives here (derived artifact)
-.axioms-freeze/            ← snapshot from last sync (for diffing)
-```
+Most existing tools operate at the spec-first level. Axiomatic Engineering operates at the spec-as-source level, with concrete mechanisms that make this practical: freeze/diff for incremental sync, labels for pluggable verification aspects, @axiom markers for traceability, and modular namespacing.
 
-You work in the root. The `_generated/` folder is the compiler output.
+## Axiom format
 
-### Axiom format
+**One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy. The main `axioms.md` file is the system map — it contains the glossary, label definitions, and links to all axiom files.
 
-Axioms are plain Markdown. The structure:
+**Labels** are pluggable verification aspects. They define what kind of verification an axiom requires. Labels are declared in the `## Labels` section of `axioms.md` and applied to axioms.
+
+Label placement follows a **cascade** (like CSS):
+- Label on `#` heading (top of file) → applies to entire file
+- Label on `##` section → applies to that section
+- Sections inherit labels from the file level
+
+Example:
 
 ```markdown
-# System Name
+# Data protection
+[rodo]
 
-## Dictionary
-- **Term** — domain definition...
+Patients can export their data in a structured format.
+Patients can delete their account and all associated data.
 
-## Labels
-### [test]
-Instructions for the test label...
+## Technical security
+[pentest] [test]
 
-### [security]
-Instructions for the security label...
+Passwords are hashed with bcrypt or argon2.
+Data at rest is encrypted. Communication via HTTPS only.
+Access to sensitive data requires 2FA.
 
-## Axioms
-### Group Name
-#### Axiom Name
-[test] [security]
-The axiom's content — what the system must do.
+## Privacy policy
+[ux-validate]
+
+The system displays privacy policy before registration.
 ```
 
-- An axiom is a heading 4 (`####`) with a human-readable name.
-- Labels in brackets (`[test]`, `[security]`, `[e2e]`) define required verification.
-- References between axioms use standard Markdown links: `[Other Axiom](#anchor)`.
-- Namespace ID: `file-path#heading-slug` (e.g. `patient-client/booking.md#visit-reservation`).
+In this example: the entire file has `[rodo]`. The "Technical security" section has `[rodo] [pentest] [test]` (inherited + own). The "Privacy policy" section has `[rodo] [ux-validate]`.
 
-The Dictionary section defines domain terms — it is not implemented, only used for understanding.
+**Narrative over checklists.** Axiom files describe pages, features, or rules narratively — as you would explain them to a colleague. They are NOT decomposed into atomic checklist items. The sync process reads the natural language description and generates code accordingly.
 
-### The sync process
+**Modular namespacing.** Axioms live in files organized by domain. Each file is a namespace. An axiom's full identifier is its file path plus optional anchor: `patient-client/booking.md` or `data-protection.md#technical-security`. This is the same format as a standard Markdown link — one convention, zero translation between references, code markers, and links.
 
-Run `/axioms-sync` in Claude Code or any other agentic cli. The process:
+**Glossary** (`## Słownik` / `## Glossary`) contains domain term definitions. Glossary entries are NOT axioms — they don't generate code or tests. They exist to ensure shared understanding of domain language between stakeholders and AI.
 
-1. **Freeze & diff** — compares current axioms against `.axioms-freeze/` to find what changed. First run treats everything as new. Use `--full` to force a complete sync.
-2. **Load axioms** — reads `axioms.md`, follows all `[Link](./file.md)` includes recursively, parses axioms, labels, and references.
-3. **Consistency check** — detects contradictions, broken references, duplicate names. Stops on error.
-4. **Change list** — for each changed axiom, determines what code in `_generated/` needs to change. Labels add requirements: `[test]` means tests must be written, `[security]` means a security review is needed.
-5. **Marker validation** — every piece of generated code is wrapped in `@axiom` markers that trace back to the source axiom. The sync validates marker pairing, naming, and checks for orphaned code.
-6. **Implementation** — generates or updates code in `_generated/`, one axiom at a time. For `[test]` axioms, tests are written first (TDD).
-7. **Verification** — runs tests, linters, and other checks required by labels. Repeats until everything passes.
+## @axiom markers
 
-### @axiom markers
-
-Every line of generated code is annotated with markers pointing to its source axiom:
+Every piece of generated code is annotated with markers pointing back to the axiom it implements:
 
 ```html
-<!-- @axiom: patient-client/booking.md#visit-reservation -->
-<form>...</form>
-<!-- /@axiom: patient-client/booking.md#visit-reservation -->
+<!-- @axiom: login-client/login.md -->
+<div class="login-form">
+  ...entire login page...
+</div>
+<!-- /@axiom: login-client/login.md -->
 ```
 
-Markers can nest — e.g. a registration form axiom containing a data protection consent axiom inside it. This gives you full traceability: for any piece of code, you know exactly which axiom requires it.
+Rules:
+- Every opening marker must have a matching closing marker
+- Markers can be nested (e.g., a registration form containing a privacy policy checkbox)
+- Marker names must correspond to existing axiom files/sections
+- Test files don't require markers
+- Format varies by language: HTML uses `<!-- -->`, JS uses `//`, CSS uses `/* */`, Bash uses `#`
 
-### Labels as a verification layer
+## How sync works
 
-Labels are the mechanism for attaching verification requirements to axioms. i/e:
+The sync process (`/axioms-sync`) is the compiler of axiomatic engineering. It reads axioms, compares them against the last known state (freeze), generates a change list, implements changes, and verifies the result.
 
-| Label                  | Effect                                                |
-|------------------------|-------------------------------------------------------|
-| `[test]`               | Unit tests required (TDD — tests written before code) |
-| `[e2e]`                | End-to-end test covering the full flow                |
-| `[security]`           | Security review                                       |
-| `[architecture-check]` | Architecture verification                             |
-| `[ux-validate]`        | UI/UX validation                                      |
+Workflow: edit axioms → run sync → code updates.
 
-An axiom marked `[test]` is not satisfied until its tests exist and pass. The label system is extensible — you define labels and their instructions in the axiom file itself.
+The sync operates in two modes:
+- **Diff mode** (default): only axioms changed since last sync are processed
+- **Full mode** (`--full`): all axioms are reprocessed
 
-### Declarative axioms
+Key steps: read axioms → check consistency → generate change list → implement changes → verify (tests, linters, label requirements) → repeat until everything passes.
 
-Some axioms describe constraints, architecture decisions, or exclusions rather than features. These don't produce code and don't need `@axiom` markers — but they guide the sync process. Examples: "no mobile app", "use SQLite", "encrypt data at rest".
+For the complete sync procedure, see [axioms-sync.md](./axioms-sync.md).
 
-## Getting started
+## Architecture and AI
 
-### Installation
+Good software architecture remains valuable in the age of AI-generated code, but the reason shifts. Traditional architecture (like volatility-based decomposition from IDesign Method) aims to minimize the cost of human-driven changes. With axiomatic engineering, AI handles the changes — but it benefits from architecture even more than humans do.
 
-To use Axiomatic Engineering in your project, copy these files into your repo:
+A well-decomposed system gives the AI agent small, closed problems with minimal context. Instead of reasoning about a 10,000-line monolith, the agent works within a 2,000-line service with clear contracts. This produces better results because AI is more sensitive to context size than humans.
 
-1. **`command/axioms-sync.md`** — the sync command. Copy it to `.claude/commands/axioms-sync.md` in your project so Claude Code registers it as `/axioms-sync`.
-2. **`test-axioms.sh`** — the marker validation script (see below). Place it at `_generated/tests/test-axioms.sh`.
+The practical rule: decompose for AI comprehensibility. Small services with clear contracts and atomic business verbs (not CRUDs) at the boundaries. For volatility-based decomposition, [idesign-architect](https://github.com/finalclass/idesign-architect) works well with this approach.
 
-Then create your axiom files in the project root (`axioms.md`, `technology.md`, etc.) and run `/axioms-sync` in Claude Code.
+## Example
 
-### The sync command
+See the [example/](./example/) directory for a simplified project demonstrating the axiom format, label cascade, namespacing, and generated code with @axiom markers.
 
-The sync process lives in `command/axioms-sync.md`. Copy it to `.claude/commands/axioms-sync.md` in your project so Claude Code registers it as the `/axioms-sync` command. It reads your axioms and generates (or updates) the code in `_generated/`.
+## License
 
-- `/axioms-sync` — diff-based sync (only changed axioms since last run).
-- `/axioms-sync --full` — full sync (all axioms, ignoring previous state).
-
-### test-axioms.sh — marker validation
-
-`test-axioms.sh` is a standalone bash test runner that validates the structural integrity of generated code. It checks that:
-
-- Every file in `_generated/` has `@axiom` markers.
-- Every opening marker (`@axiom: X`) has a matching closing marker (`/@axiom: X`).
-- Every marker reference points to an axiom that actually exists in the axiom files.
-- No orphaned code exists inside `{{content}}` blocks outside of `@axiom` markers.
-
-Run it after sync to catch structural problems:
-
-```bash
-bash test-axioms.sh
-```
-
-The script is format-aware — it handles HTML (`<!-- @axiom -->`), JS/PHP (`// @axiom`), CSS (`/* @axiom */`), and bash (`# @axiom`) markers. It also handles Polish diacritics in axiom names by generating both Unicode and ASCII-transliterated slugs for matching.
-
-You can extend the `=== PROJECT-SPECIFIC TESTS ===` section at the bottom of the script with your own assertions using the built-in helpers: `file_exists`, `has_layout`, `has_text`, `has_element`, `has_axiom_markers`, `has_matched_markers`, `has_valid_axiom_refs`, `has_no_orphaned_content`.
-
-### Bonus: IDesign architecture skill
-
-This repo includes `idesign-architecture` — a Claude Code skill based on Juval Lowy's IDesign Method ("Righting Software"). It helps with volatility-based system decomposition, layered architecture design, and service contract definition.
-
-IDesign pairs naturally with Axiomatic Engineering: use `idesign-architecture` to design your system's structure (managers, engines, accessors, utilities), then express that structure as axioms and let the sync process generate the code.
-
-The skill is available as a Claude Code agent skill — once installed, it activates automatically when you discuss system architecture, decomposition, service boundaries, or anti-patterns.
-
-### Example
-
-The `example/` folder contains a complete working example — a vanilla JS todo app with localStorage persistence. It demonstrates the full workflow: axioms as input, generated code as output, `@axiom` markers for traceability, and browser-based tests for `[test]`-labeled axioms.
-
-## Core rules
-
-- **Never edit axioms during sync.** Axioms are the source of truth.
-- **If an axiom can't be implemented, report it.** Don't work around it silently.
-- **No test = not compliant.** If an axiom has `[test]`, code without a passing test violates it.
-- **One axiom, one commit.** Small, atomic changes for traceability.
+MIT

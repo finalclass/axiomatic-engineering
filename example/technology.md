@@ -1,18 +1,10 @@
-# Technology
+# Technologia
+[architecture-check]
 
-## Stack
-#### Vanilla JS only
-No frameworks, no build tools, no npm. The app is a single `index.html` file with embedded CSS and JavaScript.
+System jest aplikacją webową. Frontend to statyczne pliki HTML/CSS/JS serwowane przez nginx. Backend to PHP 8.3 z frameworkiem Slim. Baza danych to PostgreSQL 16.
 
-#### localStorage for persistence
-No backend, no database. All data lives in the browser's localStorage.
+Architektura oparta na dekompozycji IDesign: managers (orkiestracja), engines (logika biznesowa), accessors (dostęp do danych), utilities (cross-cutting concerns). Każdy serwis ma wyraźny kontrakt — publiczne metody operują na business verbs, nie na CRUDach.
 
-#### Modern browser APIs
-Use `crypto.randomUUID()` for ID generation. Target modern evergreen browsers — no polyfills.
+Frontend jest podzielony na klientów (`*-client/`), gdzie każdy klient to osobna aplikacja SPA dla jednej grupy użytkowników. Klienci współdzielą design system i komponenty UI, ale mają niezależne aksjomaty.
 
-## UI
-#### Clean minimal design
-Light background, centered container (max-width 500px), subtle shadows. No external fonts or icons — use Unicode characters for the delete button (×).
-
-#### Responsive
-The app works on mobile and desktop. The input field and task list scale to the container width.
+Deployment: kontener Docker, CI/CD przez GitHub Actions. Jeden obraz, konfiguracja przez zmienne środowiskowe.

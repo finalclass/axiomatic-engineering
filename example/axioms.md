@@ -1,46 +1,37 @@
-# Todo App
+# KlinikaOnline
 
-A minimal task manager — add, complete, and delete tasks. Data persists in the browser via localStorage.
+System do zarządzania gabinetem medycznym online — rejestracja wizyt, panel pacjenta, panel terapeuty.
 
-[Technology decisions](./technology.md)
+## Słownik
 
-## Dictionary
-- **Task** — a single item on the todo list, with a text description and a completion status (done/not done).
-- **Task list** — the ordered collection of all tasks.
+- **Pacjent** — osoba korzystająca z usług gabinetu, posiada konto w systemie
+- **Terapeuta** — specjalista prowadzący wizyty, zarządza swoim kalendarzem
+- **Wizyta** — zarezerwowany termin spotkania pacjenta z terapeutą
+- **Grafik** — tygodniowy harmonogram dostępności terapeuty
 
-## Labels
+## Labele
+
 ### [test]
-Write unit tests before implementation (TDD). Tests run in the browser console via a self-contained test runner — no build tools, no npm.
+Testy jednostkowe. Pisane przed implementacją (TDD). Pokrywają logikę biznesową i walidację.
 
-## Axioms
-### Data model
-#### Task structure
-[test]
-A task is an object with three fields: `id` (unique string, generated via `crypto.randomUUID()`), `text` (non-empty string), `done` (boolean, default `false`).
+### [e2e]
+Testy end-to-end. Pokrywają pełny flow użytkownika od wejścia na stronę do zakończenia akcji.
 
-#### Persistence
-[test]
-The task list is stored in `localStorage` under the key `todo-tasks` as a JSON array. Every mutation (add, toggle, delete) immediately saves the full list. On page load, the list is restored from localStorage. If the key is missing or the JSON is invalid, start with an empty list.
+### [rodo]
+Wymogi RODO. Każdy aksjomat z tym labelem musi zapewniać zgodność z rozporządzeniem o ochronie danych osobowych.
 
-### User interactions
-#### Add task
-[test]
-The user types a task description into an input field and submits (Enter key or button click). If the input is empty or whitespace-only, nothing happens. After adding, the input is cleared and focused.
+### [pentest]
+Wymogi bezpieczeństwa weryfikowane testem penetracyjnym.
 
-#### Toggle task
-[test]
-Clicking a task's checkbox toggles its `done` status. Completed tasks are visually distinguished with a strikethrough and muted color.
+### [architecture-check]
+Weryfikacja zgodności z architekturą systemu (dekompozycja, kontrakty serwisów, warstwy).
 
-#### Delete task
-[test]
-Each task has a delete button. Clicking it removes the task from the list immediately — no confirmation dialog.
+### [ux-validate]
+Weryfikacja użyteczności interfejsu — czy UI jest zrozumiały dla użytkownika bez instrukcji.
 
-#### Filter tasks
-Buttons or tabs allow filtering the visible tasks: All, Active (not done), Completed (done). The current filter is visually highlighted. Changing the filter does not modify the data — only the display.
+## Aksjomaty
 
-#### Task counter
-The footer displays the number of active (not done) tasks in the format: `{n} items left`.
-
-### Bulk actions
-#### Clear completed
-A "Clear completed" button removes all tasks with `done === true` from the list. The button is only visible when at least one completed task exists.
+- [Technologia](./technology.md)
+- [Ochrona danych](./data-protection.md)
+- [Strona główna](./landing-client/main.md)
+- [Logowanie](./login-client/login.md)
