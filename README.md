@@ -29,7 +29,39 @@ If you think AI is a better autocomplete for writing loops, this framework is no
 
 **Specification is the product.** Code is derived. If your axioms are precise and complete, the generated code is correct. If the code has a bug, the axiom is incomplete — you fix the axiom, not the code.
 
+**Progressive refinement.** You never leave the framework to fix code — you refine the axiom. Axioms exist on a natural gradient of specificity:
+
+1. General intent — *"The login page has an email and password field."*
+2. Detailed description — *"The password field requires minimum 8 characters. Validation errors appear below the field in red."*
+3. Specific instruction — *"Use a generic error message for failed login to prevent account enumeration."*
+4. Literal code — a code block in the axiom with the exact implementation to use.
+
+When the AI misinterprets an axiom, you don't bypass the framework — you move one level down the gradient. Add more detail, add verification labels, and if precision demands it, embed the exact code in the axiom with an explanation of *why* it must be exactly that way. The axiom always remains the source of truth, whether it describes intent in a sentence or specifies `padding-left: 3px` in a code block.
+
+This gradient is self-correcting: each iteration makes the specification more precise. Instead of escaping the framework when it produces wrong code, you deepen it — and the next sync gets it right.
+
 **Layered verification.** Axioms can carry labels — `[test]`, `[security]`, `[e2e]`, `[rodo]` — that define what kind of verification each axiom requires. A strict type system (e.g. OCaml) adds another verification layer at compile time. The combination of typed languages, labeled tests, and AI-powered sync creates a multi-layered safety net where each layer catches a different class of errors.
+
+**Labels as verification pipelines.** A label is not just a tag — it is a declarative verification pipeline. The engineer defines *how* each label is verified: which static analysis tools to run, which AI model to use for review, what specific concerns to check for. The label definition is the engineer's primary lever for ensuring code quality. A well-designed label catches what the generating agent misses.
+
+Each label runs as a **separate agent** with its own context during verification. The verifying agent sees only the axiom and the generated code — never the generating agent's reasoning. This isolation prevents tautological verification (the same model "confirming" its own work). For stronger guarantees, labels can specify a different model than the one used for code generation.
+
+```markdown
+### [security]
+model: opus
+1. Run `semgrep --config=p/owasp-top-ten` on changed files
+2. Agent review: check for injection, auth bypass, data exposure
+3. If backend: run `sqlmap` on endpoints
+
+### [perf]
+1. Run benchmark suite: `make bench`
+2. Agent review: check for N+1 queries, unbounded loops, missing indexes
+3. Compare results against baseline from previous sync
+```
+
+**Deterministic tools first.** The strongest verification pipelines maximize the use of deterministic tools — linters, type checkers, static analyzers, benchmark suites, OWASP scanners — and use AI agents only for what deterministic tools cannot catch (semantic review, intent matching, architectural judgment). A label that runs `semgrep` + `sqlmap` + an AI review is stronger than one that relies on AI review alone, because deterministic tools have zero hallucination rate. The ideal label pipeline is: deterministic tools catch the known classes of errors, AI agent catches the rest.
+
+The engineer's role shifts from reviewing code line-by-line to designing verification pipelines and interpreting their results.
 
 **Loose syntax, strict semantics.** Axioms are written in Markdown — readable by developers, clients, and regulators. No formal DSL required. LLMs can parse intent from natural language; you don't need rigid structure for machine-readability anymore. Precision comes from the verification layer (types, tests, labels), not from the specification format.
 
@@ -64,9 +96,10 @@ Most existing tools operate at the spec-first level. Axiomatic Engineering opera
 **Labels** are pluggable verification aspects. They define what kind of verification an axiom requires. Labels are declared in the `## Labels` section of `axioms.md` and applied to axioms.
 
 Label placement follows a **cascade** (like CSS):
-- Label on `#` heading (top of file) → applies to entire file
+- Label under `## Aksjomaty` in `axioms.md` → applies to all axioms (global)
+- Label on `#` heading (top of axiom file) → applies to entire file
 - Label on `##` section → applies to that section
-- Sections inherit labels from the file level
+- Each level inherits labels from the level above
 
 Example:
 
@@ -100,7 +133,7 @@ In this example: the entire file has `[rodo]`. The "Technical security" section 
 
 ## @axiom markers
 
-Every piece of generated code is annotated with markers pointing back to the axiom it implements:
+Generated code is wrapped in block-level markers pointing back to the axiom it implements:
 
 ```html
 <!-- @axiom: login-client/login.md -->
@@ -124,10 +157,16 @@ The sync process (`/axioms-sync`) is the compiler of axiomatic engineering. It r
 Workflow: edit axioms → run sync → code updates.
 
 The sync operates in two modes:
-- **Diff mode** (default): only axioms changed since last sync are processed
-- **Full mode** (`--full`): all axioms are reprocessed
+- **Diff mode** (default): only axioms changed since last sync are processed. The sync maintains a freeze snapshot (`.axioms/freeze/`) to detect what changed since the last run.
+- **Full mode** (`--full`): all axioms are reprocessed regardless of freeze state.
 
-Key steps: read axioms → check consistency → generate change list → implement changes → verify (tests, linters, label requirements) → repeat until everything passes.
+Axiom files are loaded by following the link chain from `axioms.md` — only files reachable through links are included in the sync.
+
+Key steps: snapshot & diff → read axioms → check consistency → generate change list → verify `@axiom` markers → implement changes → verify (tests, label requirements) → repeat until everything passes.
+
+**Declarative axioms.** Some axioms describe rules, architecture, or exclusions that have no direct representation in code. These axioms don't require `@axiom` markers in generated files.
+
+**Batch processing.** When the number of axioms to process is large (>20), the sync splits work into batches — consistency checking runs on the full set, but implementation proceeds one axiom at a time.
 
 For the complete sync procedure, see [axioms-sync.md](./axioms-sync.md).
 
