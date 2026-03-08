@@ -216,10 +216,16 @@ Od razu przejdź do implementacji — nie czekaj na potwierdzenie użytkownika.
 ### Krok 5: Weryfikacja
 
 Po implementacji wszystkich zmian:
-1. Uruchom testy, lintery i inne narzędzia wymagane przez labele.
-2. Jeśli coś nie przechodzi — napraw kod tak, aby spełniał aksjomaty. To nadal jest część sync.
-3. Powtarzaj aż wszystko przechodzi.
-4. Sync-axioms kończy się dopiero gdy kod jest zgodny z aksjomatami I wszystkie labele są spełnione.
+1. Zbierz wszystkie labele znalezione w zmienionych aksjomatach. Dla każdego labela przeczytaj jego definicję z sekcji "## Labele" w aksjomatach. Wypisz listę wymaganych akcji weryfikacyjnych:
+   ```
+   ## Weryfikacja — wymagane akcje
+   - [label1]: <akcja z definicji labela>
+   - [label2]: <akcja z definicji labela>
+   ```
+2. Wykonaj każdą wymaganą akcję z listy. Nie pomijaj żadnej.
+3. Jeśli coś nie przechodzi — napraw kod tak, aby spełniał aksjomaty. To nadal jest część sync.
+4. Powtarzaj aż wszystko przechodzi.
+5. Sync-axioms kończy się dopiero gdy kod jest zgodny z aksjomatami I wszystkie labele są spełnione.
 
 Jeśli po zakończeniu sync użytkownik nadal widzi błędy — to sygnał, że specyfikacja jest niekompletna (brakuje aksjomatu lub labela). Ale to już poza zakresem tego sync — wymaga edycji aksjomatów i ponownego uruchomienia.
 
