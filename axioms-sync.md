@@ -8,7 +8,7 @@ Workflow: edytuj aksjomaty → uruchom `/axioms-sync` → kod się aktualizuje.
 
 ## Struktura folderów
 
-- Root projektu — aksjomaty systemu (tu programista pracuje): `axioms.md`, `technology.md`, `data-protection.md`, `ui-template.html`, oraz foldery `*-client/` (np. `landing-client/`, `login-client/`, `patient-client/`, `therapist-client/`, `admin-client/`)
+- Root projektu — aksjomaty systemu (tu programista pracuje): `main.md`, `technology.md`, `data-protection.md`, `ui-template.html`, oraz foldery `*-client/` (np. `landing-client/`, `login-client/`, `patient-client/`, `therapist-client/`, `admin-client/`)
 - `_generated/` — kod systemu (generowany z aksjomatów). Utwórz jeśli nie istnieje.
 - `.axioms/` — folder roboczy sync (tymczasowe pliki, snapshoty). Utwórz jeśli nie istnieje.
   - `.axioms/current/` — kopia aksjomatów z bieżącego uruchomienia (tworzona na starcie sync)
@@ -18,9 +18,9 @@ Twoje zadanie: doprowadzić kod w `_generated/` do zgodności z aksjomatami.
 
 ## Format aksjomatów
 
-### Plik główny: `axioms.md`
+### Plik główny: `main.md`
 
-`axioms.md` to mapa systemu — zawiera słownik, definicje labeli i linki do plików aksjomatów. Sam NIE zawiera aksjomatów.
+`main.md` to mapa systemu — zawiera słownik, definicje labeli i linki do plików aksjomatów. Sam NIE zawiera aksjomatów.
 
 Struktura:
 ```
@@ -82,7 +82,7 @@ Składnia:
 ### Kaskada labeli
 
 Labele dziedziczą w dół (jak CSS):
-- Label pod `## Aksjomaty` w `axioms.md` → dotyczy WSZYSTKICH aksjomatów (globalny)
+- Label pod `## Aksjomaty` w `main.md` → dotyczy WSZYSTKICH aksjomatów (globalny)
 - Label na `#` (nagłówek pliku aksjomatu) → dotyczy całego pliku
 - Label na `##` (sekcja) → dotyczy tej sekcji
 - Każdy poziom dziedziczy labele z poziomu wyższego
@@ -105,7 +105,7 @@ Passwords are hashed with bcrypt or argon2.
 The system displays privacy policy before registration.
 ```
 
-W tym przykładzie: cały plik ma `[rodo]`. Sekcja "Technical security" ma `[rodo] [pentest] [test]` (dziedziczone + własne). Sekcja "Privacy policy" ma `[rodo] [ux-validate]`. Jeśli w `axioms.md` pod `## Aksjomaty` jest `[lint]`, to wszystkie sekcje mają dodatkowo `[lint]`.
+W tym przykładzie: cały plik ma `[rodo]`. Sekcja "Technical security" ma `[rodo] [pentest] [test]` (dziedziczone + własne). Sekcja "Privacy policy" ma `[rodo] [ux-validate]`. Jeśli w `main.md` pod `## Aksjomaty` jest `[lint]`, to wszystkie sekcje mają dodatkowo `[lint]`.
 
 ## Markery @axiom w kodzie
 
@@ -196,11 +196,11 @@ Wykonaj poniższe kroki SEKWENCYJNIE. Nie przechodź do następnego kroku bez za
 
 ### Krok 1: Wczytaj aksjomaty
 
-1. Przeczytaj `axioms.md`.
+1. Przeczytaj `main.md`.
 2. Znajdź wszystkie includy — linki w formacie `[Nazwa](./plik.md)`. Przeczytaj te pliki.
    - Każdy includowany plik to osobny aksjomat.
    - **Rekurencyjnie:** jeśli includowany plik sam zawiera linki do innych plików `.md` (ścieżki względne), przeczytaj też te pliki. Powtarzaj aż nie ma nowych linków.
-   - NIE skanuj plików w folderze, które nie są osiągalne przez łańcuch linków z `axioms.md`.
+   - NIE skanuj plików w folderze, które nie są osiągalne przez łańcuch linków z `main.md`.
 3. Sparsuj aksjomaty ze wszystkich wczytanych plików: wyodrębnij nazwy (heading `#`), sekcje (heading `##`), labele (`[...]`), referencje, treść. Uwzględnij kaskadę labeli (globalny z `## Aksjomaty`, plik `#`, sekcja `##`).
 4. Sparsuj definicje labeli z sekcji "## Labele".
 

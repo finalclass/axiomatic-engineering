@@ -91,12 +91,12 @@ Most existing tools operate at the spec-first level. Axiomatic Engineering opera
 
 ## Axiom format
 
-**One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy. The main `axioms.md` file is the system map — it contains the glossary, label definitions, and links to all axiom files.
+**One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy. The main `main.md` file is the system map — it contains the glossary, label definitions, and links to all axiom files.
 
-**Labels** are pluggable verification aspects. They define what kind of verification an axiom requires. Labels are declared in the `## Labels` section of `axioms.md` and applied to axioms.
+**Labels** are pluggable verification aspects. They define what kind of verification an axiom requires. Labels are declared in the `## Labels` section of `main.md` and applied to axioms.
 
 Label placement follows a **cascade** (like CSS):
-- Label under `## Aksjomaty` in `axioms.md` → applies to all axioms (global)
+- Label under `## Aksjomaty` in `main.md` → applies to all axioms (global)
 - Label on `#` heading (top of axiom file) → applies to entire file
 - Label on `##` section → applies to that section
 - Each level inherits labels from the level above
@@ -160,7 +160,7 @@ The sync operates in two modes:
 - **Diff mode** (default): only axioms changed since last sync are processed. The sync maintains a freeze snapshot (`.axioms/freeze/`) to detect what changed since the last run.
 - **Full mode** (`--full`): all axioms are reprocessed regardless of freeze state.
 
-Axiom files are loaded by following the link chain from `axioms.md` — only files reachable through links are included in the sync.
+Axiom files are loaded by following the link chain from `main.md` — only files reachable through links are included in the sync.
 
 Key steps: snapshot & diff → read axioms → check consistency → generate change list → verify `@axiom` markers → implement changes → verify (tests, label requirements) → repeat until everything passes.
 
