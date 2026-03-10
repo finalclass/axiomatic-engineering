@@ -1,38 +1,26 @@
-# KlinikaOnline
+# Todo
 
-System do zarządzania gabinetem medycznym online — rejestracja wizyt, panel pacjenta, panel terapeuty.
+A task management system.
 
-## Słownik
+## Glossary
 
-- **Pacjent** — osoba korzystająca z usług gabinetu, posiada konto w systemie
-- **Terapeuta** — specjalista prowadzący wizyty, zarządza swoim kalendarzem
-- **Wizyta** — zarezerwowany termin spotkania pacjenta z terapeutą
-- **Grafik** — tygodniowy harmonogram dostępności terapeuty
+- **testing** — test server at todo.szwalnia.finalizator.pl
 - **satisfaction-level** — 0.7
 
-## Labele
+## Labels
 
-### [test] @implementation @validation +code
-Testy jednostkowe. Pisane przed implementacją (TDD). Pokrywają logikę biznesową i walidację.
+### [ui] @satisfaction(satisfaction-level) +browser
 
-### [e2e] @validation +browser
-Testy end-to-end. Pokrywają pełny flow użytkownika od wejścia na stronę do zakończenia akcji.
+Check the page's visual quality using the frontend-design skill.
 
-### [rodo] @implementation @validation +code +axioms
-Wymogi RODO. Każdy aksjomat z tym labelem musi zapewniać zgodność z rozporządzeniem o ochronie danych osobowych.
+### [smoketest] @implementation @validation +code +api
 
-### [pentest] @validation +code +api
-Wymogi bezpieczeństwa weryfikowane testem penetracyjnym.
+Deploy the system to testing and verify it returns HTTP 200.
 
-### [architecture-check] @validation +code +axioms
-Weryfikacja zgodności z architekturą systemu (dekompozycja, kontrakty serwisów, warstwy).
+## Axioms
 
-### [ux-validate] @satisfaction(satisfaction-level) +browser
-Weryfikacja użyteczności interfejsu — AI-sędzia otwiera aplikację w przeglądarce i ocenia czy UI jest zrozumiały dla użytkownika bez instrukcji.
-
-## Aksjomaty
-
-- [Technologia](./technology.md)
-- [Ochrona danych](./data-protection.md)
-- [Strona główna](./landing-client/main.md)
-- [Logowanie](./login-client/login.md)
+- [Technology](./technology.md)
+- [Main use case](./main-use-case.md)
+- [Page design](./frontend-design.md)
+- [Hiding finished tasks](./hiding-finished.md)
+- [Infrastructure](./infrastructure.md)
