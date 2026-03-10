@@ -11,22 +11,22 @@ System do zarządzania gabinetem medycznym online — rejestracja wizyt, panel p
 
 ## Labele
 
-### [test]
+### [test] @implementation @validation
 Testy jednostkowe. Pisane przed implementacją (TDD). Pokrywają logikę biznesową i walidację.
 
-### [e2e]
+### [e2e] @validation
 Testy end-to-end. Pokrywają pełny flow użytkownika od wejścia na stronę do zakończenia akcji.
 
-### [rodo]
+### [rodo] @implementation @validation
 Wymogi RODO. Każdy aksjomat z tym labelem musi zapewniać zgodność z rozporządzeniem o ochronie danych osobowych.
 
-### [pentest]
+### [pentest] @validation
 Wymogi bezpieczeństwa weryfikowane testem penetracyjnym.
 
-### [architecture-check]
+### [architecture-check] @validation
 Weryfikacja zgodności z architekturą systemu (dekompozycja, kontrakty serwisów, warstwy).
 
-### [ux-validate]
+### [ux-validate] @validation
 Weryfikacja użyteczności interfejsu — czy UI jest zrozumiały dla użytkownika bez instrukcji.
 
 ## Aksjomaty

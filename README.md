@@ -7,8 +7,11 @@ A framework for building software systems from declarative specifications — no
 You don't write code. You write **axioms** — plain-language statements that define what your system does. An AI-powered sync process reads your axioms and generates (or updates) the codebase to match. When requirements change, you edit the axioms and re-sync. The code follows.
 
 ```
-/  ← you work here (source of truth)
-_generated/  ← generated code (derived artifact)
+axioms/     ← you work here (source of truth)
+axioms/main.md  ← entry point (system map)
+code/       ← generated code (derived artifact)
+data/       ← runtime data (databases, uploads, etc.)
+.axioms/    ← sync working directory (freeze, snapshots)
 ```
 
 This inverts the traditional workflow. Instead of translating requirements into code by hand, you maintain a living specification that compiles into a working system. The axioms are the project — the code is a build artifact.
@@ -44,16 +47,32 @@ This gradient is self-correcting: each iteration makes the specification more pr
 
 **Labels as verification pipelines.** A label is not just a tag — it is a declarative verification pipeline. The engineer defines *how* each label is verified: which static analysis tools to run, which AI model to use for review, what specific concerns to check for. The label definition is the engineer's primary lever for ensuring code quality. A well-designed label catches what the generating agent misses.
 
+**Label phases.** Each label declares its visibility in the pipeline using phase annotations: `@implementation`, `@validation`, or both. This controls which agent sees axiom blocks carrying that label:
+
+- `@implementation` — visible to the implementing agent (code generation)
+- `@validation` — visible to the validating agent (verification)
+- Both — visible to both (e.g., `[test]` for TDD: tests written during implementation, then verified)
+- `@validation` only — **holdout**: hidden from the implementing agent entirely. The agent builds software without knowing these validation criteria. This works like a holdout set in machine learning — preventing the agent from optimizing for test passage rather than building correct software.
+
+Every label must declare at least one phase. A label without a phase annotation is an error caught during consistency checking.
+
 Each label runs as a **separate agent** with its own context during verification. The verifying agent sees only the axiom and the generated code — never the generating agent's reasoning. This isolation prevents tautological verification (the same model "confirming" its own work). For stronger guarantees, labels can specify a different model than the one used for code generation.
 
 ```markdown
-### [security]
+### [security] @validation
 model: opus
 1. Run `semgrep --config=p/owasp-top-ten` on changed files
 2. Agent review: check for injection, auth bypass, data exposure
 3. If backend: run `sqlmap` on endpoints
 
-### [perf]
+### [test] @implementation @validation
+Unit tests. Written before implementation (TDD).
+
+### [e2e] @validation
+End-to-end scenarios. Validated against the running application
+after implementation — the implementing agent never sees these.
+
+### [perf] @validation
 1. Run benchmark suite: `make bench`
 2. Agent review: check for N+1 queries, unbounded loops, missing indexes
 3. Compare results against baseline from previous sync
@@ -73,7 +92,7 @@ Axioms solve this by treating the entire specification as a single, always-prese
 
 This is the fundamental difference between "programming by prompting" and programming by specification: prompts are ephemeral, axioms are cumulative.
 
-**Modular namespacing.** Axioms live in files organized by domain. Each file is a namespace. An axiom's full identifier is its file path plus anchor: `patient-panel/booking.md#visit-reservation`. This is the same format as a standard Markdown link — one convention, zero translation.
+**Modular namespacing.** Axioms live in the `axioms/` directory, organized by domain. Each file is a namespace. An axiom's full identifier is its file path (relative to `axioms/`) plus anchor: `patient-panel/booking.md#visit-reservation`. This is the same format as a standard Markdown link — one convention, zero translation.
 
 ## A note on the future
 
@@ -91,9 +110,9 @@ Most existing tools operate at the spec-first level. Axiomatic Engineering opera
 
 ## Axiom format
 
-**One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy. The main `main.md` file is the system map — it contains the glossary, label definitions, and links to all axiom files.
+**One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy. All axiom files live in the `axioms/` directory. The entry point `axioms/main.md` is the system map — it contains the glossary, label definitions, and links to all axiom files.
 
-**Labels** are pluggable verification aspects. They define what kind of verification an axiom requires. Labels are declared in the `## Labels` section of `main.md` and applied to axioms.
+**Labels** are pluggable verification aspects with explicit phase annotations (`@implementation`, `@validation`). They define what kind of verification an axiom requires and which agents see the axiom's content. Labels are declared in the `## Labels` section of `main.md` and applied to axioms.
 
 Label placement follows a **cascade** (like CSS):
 - Label under `## Aksjomaty` in `main.md` → applies to all axioms (global)
@@ -127,7 +146,7 @@ In this example: the entire file has `[rodo]`. The "Technical security" section 
 
 **Narrative over checklists.** Axiom files describe pages, features, or rules narratively — as you would explain them to a colleague. They are NOT decomposed into atomic checklist items. The sync process reads the natural language description and generates code accordingly.
 
-**Modular namespacing.** Axioms live in files organized by domain. Each file is a namespace. An axiom's full identifier is its file path plus optional anchor: `patient-client/booking.md` or `data-protection.md#technical-security`. This is the same format as a standard Markdown link — one convention, zero translation between references, code markers, and links.
+**Modular namespacing.** Axioms live in the `axioms/` directory, organized by domain. Each file is a namespace. An axiom's full identifier is its file path (relative to `axioms/`) plus optional anchor: `patient-client/booking.md` or `data-protection.md#technical-security`. This is the same format as a standard Markdown link — one convention, zero translation between references, code markers, and links.
 
 **Glossary** (`## Słownik` / `## Glossary`) contains domain term definitions. Glossary entries are NOT axioms — they don't generate code or tests. They exist to ensure shared understanding of domain language between stakeholders and AI.
 
@@ -162,7 +181,12 @@ The sync operates in two modes:
 
 Axiom files are loaded by following the link chain from `main.md` — only files reachable through links are included in the sync.
 
-Key steps: snapshot & diff → read axioms → check consistency → generate change list → verify `@axiom` markers → implement changes → verify (tests, label requirements) → repeat until everything passes.
+The sync process follows an **orchestrator pattern**. The main process handles planning (snapshot, diff, reading axioms, consistency checks, change list generation, marker verification) and then delegates execution to isolated agents:
+
+- **Implementing agent** — receives axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only labels are stripped from its context. Builds code and writes tests for `@implementation` labels.
+- **Validating agent(s)** — receive axioms filtered to `@validation` labels. For `@validation`-only (holdout) labels, the agent has no access to source code — it evaluates system behavior from the outside.
+
+If validation fails, the implementing agent receives the error description but still never sees holdout blocks — it must fix the issue based on the error alone.
 
 **Declarative axioms.** Some axioms describe rules, architecture, or exclusions that have no direct representation in code. These axioms don't require `@axiom` markers in generated files.
 
