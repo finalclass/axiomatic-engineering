@@ -56,15 +56,21 @@ Sekcja "## Labele":
 - Każdy label ma opis/instrukcje pod headingiem
 - Labele określają wymagane działanie dla aksjomatu (np. pisanie testów, przegląd bezpieczeństwa)
 - Label może definiować pipeline weryfikacyjny: konkretne komendy do uruchomienia, model AI do użycia, narzędzia statyczne
-- **Fazy labela:** Po nazwie labela w headingu podaje się jedną lub więcej faz: `@implementation`, `@validation`, `@satisfaction`. Fazy określają widoczność bloków aksjomatu w pipeline:
+- **Fazy labela:** Po nazwie labela w headingu podaje się jedną lub więcej faz: `@implementation`, `@validation`, `@satisfaction`. Fazy określają *kiedy* uruchomić agenta dla tego labela:
   - `@implementation` — bloki z tym labelem trafiają do agenta implementującego (Krok 5)
   - `@validation` — bloki trafiają do agenta walidującego (Krok 6)
-  - `@satisfaction` — bloki trafiają do agenta-sędziego (Krok 7). Agent używa działającej aplikacji jak człowiek i ocenia doświadczenie w skali 0.0–1.0.
+  - `@satisfaction(próg)` — bloki trafiają do agenta-sędziego (Krok 7). Agent ocenia doświadczenie w skali 0.0–1.0. Próg to minimalny wymagany score, np. `@satisfaction(0.8)`. Domyślnie `@satisfaction` = `@satisfaction(0.7)`.
   - Label z oboma fazami (`@implementation @validation`) — widoczny dla obu agentów (np. `[test]` — TDD w implementacji + weryfikacja)
   - Label tylko z `@validation` — ukryty przed agentem implementującym (holdout). Agent buduje software bez wiedzy o tych kryteriach walidacyjnych. Działa jak holdout set w ML.
   - Label tylko z `@satisfaction` — scenariusz nie generuje kodu ani testów. Jest promptem dla AI-sędziego, który wchodzi w interakcję z działającą aplikacją i ocenia ją subiektywnie. To jest walidacja tego, czego nie da się sprawdzić deterministycznym testem: UX, czytelność, intuicyjność, ogólna jakość.
   - Label bez żadnej fazy — **błąd**. Sync zatrzymuje się w Kroku 2 (spójność) z komunikatem: "Label `[x]` nie ma zdefiniowanej fazy (@implementation / @validation / @satisfaction)."
-- **Izolacja agentów:** Implementacja (Krok 5), weryfikacja (Krok 6) i satisfaction review (Krok 7) są delegowane do osobnych agentów z przefiltrowanym kontekstem. Proces główny (Kroki 0–4) pełni rolę orkiestratora — czyta aksjomaty, buduje plan, filtruje kontekst i deleguje pracę. Agent implementujący NIE widzi bloków z labeli `@validation`-only ani `@satisfaction`-only. Agent weryfikujący NIE widzi procesu myślowego agenta implementującego. Agent-sędzia (satisfaction) NIE widzi kodu źródłowego — ocenia wyłącznie działającą aplikację.
+- **Znaczniki kontekstu (`+`):** Po fazach można podać znaczniki kontekstu, które określają *co* agent dostaje. Każdy agent zawsze otrzymuje swój aksjomat (ten z którego wynika label). Dostępne znaczniki:
+  - `+code` — dostęp do kodu źródłowego w `code/`
+  - `+axioms` — dostęp do wszystkich aksjomatów systemu (nie tylko swojego)
+  - `+browser` — dostęp do przeglądarki / działającej aplikacji (browser automation)
+  - `+api` — dostęp do endpointów HTTP (curl, requesty)
+  - Brak znaczników = agent dostaje tylko swój aksjomat i instrukcje labela
+- **Izolacja agentów:** Każdy label w fazach weryfikacji i satisfaction uruchamia **osobnego agenta** z kontekstem określonym przez znaczniki `+`. Proces główny (Kroki 0–4) pełni rolę orkiestratora — czyta aksjomaty, buduje plan, filtruje kontekst i deleguje pracę. Agent implementujący NIE widzi bloków z labeli `@validation`-only ani `@satisfaction`-only. Agent weryfikujący NIE widzi procesu myślowego agenta implementującego. Znaczniki `+` kontrolują co każdy agent widzi — np. agent `[ux-validate]` z `+browser` bez `+code` nie może oszukać sprawdzając HTML zamiast oceniać UI.
 
 ### Pliki aksjomatów
 
@@ -280,8 +286,8 @@ Zbierz bloki aksjomatów oznaczone labelami `@satisfaction`. Każdy taki blok to
 
 Dla każdego scenariusza odczytaj:
 1. **Prompt** — treść aksjomatu (opis co sprawdzić, jak ocenić)
-2. **Próg** — wymagany minimalny score (domyślnie 0.7 jeśli nie podany)
-3. **Narzędzia** — jeśli definicja labela określa narzędzia (np. browser automation)
+2. **Próg** — z `@satisfaction(próg)` w definicji labela (domyślnie 0.7)
+3. **Kontekst** — znaczniki `+` z definicji labela (np. `+browser` = browser automation)
 
 Wypisz w formacie:
 ```
@@ -325,13 +331,13 @@ Deleguj weryfikację do **osobnego agenta** (lub osobnych agentów per label). W
 
 **A) Weryfikacja standardowa:**
 1. Uruchom każdą komendę z checklisty weryfikacyjnej (Krok 3B). Nie pomijaj żadnej.
-2. **Każdy label odpalaj jako osobnego agenta** z czystym kontekstem. Agent weryfikujący otrzymuje: aksjomat, wygenerowany kod i instrukcje labela. NIE otrzymuje historii generowania ani procesu myślowego agenta implementującego. Jeśli label definiuje model — użyj tego modelu.
+2. **Każdy label odpalaj jako osobnego agenta** z czystym kontekstem. Agent otrzymuje: swój aksjomat i instrukcje labela + zasoby określone przez znaczniki `+` (np. `+code` = kod źródłowy, `+browser` = przeglądarka, `+api` = endpointy HTTP, `+axioms` = wszystkie aksjomaty). NIE otrzymuje historii generowania ani procesu myślowego agenta implementującego. Jeśli label definiuje model — użyj tego modelu.
 
 **B) Weryfikacja `@validation`-only (holdout):**
 Dla każdego scenariusza `@validation`-only z Kroku 3B:
-1. Agent walidujący otrzymuje: treść scenariusza + dostęp do działającej aplikacji lub skompilowanego kodu.
-2. Agent walidujący **NIE otrzymuje kodu źródłowego** — ocenia wyłącznie zachowanie systemu z zewnątrz.
-3. Jeśli definicja labela opisuje sposób walidacji (np. konkretne komendy, narzędzia) — użyj ich.
+1. Agent walidujący otrzymuje: treść scenariusza + zasoby wg znaczników `+` z definicji labela.
+2. Jeśli label **nie ma** `+code` — agent NIE otrzymuje kodu źródłowego, ocenia wyłącznie zachowanie systemu z zewnątrz.
+3. Jeśli label **ma** `+code` (np. `[architecture-check]`) — agent otrzymuje kod, bo weryfikacja dotyczy struktury kodu, nie zachowania.
 
 **C) Naprawianie błędów:**
 1. Jeśli coś nie przechodzi (A lub B) — deleguj naprawę do agenta implementującego (z tym samym przefiltrowanym kontekstem + informacją o błędzie, ale nadal **bez bloków `@validation`-only**).
@@ -350,12 +356,11 @@ Dla każdego scenariusza `@satisfaction` z Kroku 3C:
 
 1. **Deleguj do osobnego agenta-sędziego.** Agent otrzymuje:
    - Treść scenariusza (prompt z aksjomatu)
-   - Dostęp do działającej aplikacji (URL, browser automation, itp.)
-   - Narzędzia zdefiniowane w labelu (np. browser automation, screenshot)
-2. **Agent NIE otrzymuje:**
-   - Kodu źródłowego
+   - Zasoby określone przez znaczniki `+` z definicji labela (np. `+browser` = browser automation, `+api` = HTTP requesty)
+2. **Agent NIE otrzymuje** (chyba że znacznik `+` jawnie to daje):
+   - Kodu źródłowego (brak `+code`)
    - Procesu myślowego agentów implementującego i walidującego
-   - Treści aksjomatów spoza scenariusza
+   - Treści aksjomatów spoza scenariusza (brak `+axioms`)
 3. **Agent wykonuje scenariusz** — wchodzi w interakcję z aplikacją jak użytkownik (klika, nawiguje, sprawdza UI) i ocenia doświadczenie.
 4. **Agent zwraca:**
    - Score: 0.0–1.0

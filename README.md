@@ -47,44 +47,56 @@ This gradient is self-correcting: each iteration makes the specification more pr
 
 **Labels as verification pipelines.** A label is not just a tag — it is a declarative verification pipeline. The engineer defines *how* each label is verified: which static analysis tools to run, which AI model to use for review, what specific concerns to check for. The label definition is the engineer's primary lever for ensuring code quality. A well-designed label catches what the generating agent misses.
 
-**Label phases.** Each label declares its visibility in the pipeline using phase annotations: `@implementation`, `@validation`, `@satisfaction`, or a combination. This controls which agent sees axiom blocks carrying that label:
+**Label phases.** Each label declares its visibility in the pipeline using phase annotations: `@implementation`, `@validation`, `@satisfaction(threshold)`, or a combination. Phases control *when* an agent runs:
 
 - `@implementation` — visible to the implementing agent (code generation)
 - `@validation` — visible to the validating agent (deterministic verification)
-- `@satisfaction` — visible to the AI judge agent (subjective evaluation of the running application)
+- `@satisfaction(threshold)` — visible to the AI judge agent (subjective evaluation of the running application). The threshold is the minimum required score (0.0–1.0), defaulting to 0.7 if omitted: `@satisfaction` = `@satisfaction(0.7)`.
 - Both `@implementation @validation` — visible to both (e.g., `[test]` for TDD: tests written during implementation, then verified)
 - `@validation` only — **holdout**: hidden from the implementing agent entirely. The agent builds software without knowing these validation criteria. This works like a holdout set in machine learning — preventing the agent from optimizing for test passage rather than building correct software.
 - `@satisfaction` only — the scenario does not generate code or tests. It is a prompt for an AI judge that interacts with the running application and evaluates it subjectively (UX, readability, intuitiveness, overall quality). The judge returns a score (0.0–1.0) instead of pass/fail.
 
 Every label must declare at least one phase. A label without a phase annotation is an error caught during consistency checking.
 
-Each label runs as a **separate agent** with its own context during verification. The verifying agent sees only the axiom and the generated code — never the generating agent's reasoning. This isolation prevents tautological verification (the same model "confirming" its own work). For stronger guarantees, labels can specify a different model than the one used for code generation.
+**Context markers (`+`).** Each label also declares *what* its agent receives using `+` markers after the phase annotations. Every agent always receives its own axiom. Available markers:
+
+- `+code` — access to source code in `code/`
+- `+axioms` — access to all axioms (not just its own)
+- `+browser` — access to a browser / running application (browser automation)
+- `+api` — access to HTTP endpoints (curl, requests)
+
+No markers = the agent receives only its axiom and label instructions. This is a security mechanism: an agent without `+code` cannot cheat by inspecting implementation details — it must evaluate behavior from the outside.
+
+Each label runs as a **separate agent** with its own context during verification. The verifying agent sees only the resources granted by its `+` markers — never the generating agent's reasoning. This isolation prevents tautological verification (the same model "confirming" its own work). For stronger guarantees, labels can specify a different model than the one used for code generation.
 
 ```markdown
-### [security] @validation
+### [security] @validation +code +api
 model: opus
 1. Run `semgrep --config=p/owasp-top-ten` on changed files
 2. Agent review: check for injection, auth bypass, data exposure
 3. If backend: run `sqlmap` on endpoints
 
-### [test] @implementation @validation
+### [test] @implementation @validation +code
 Unit tests. Written before implementation (TDD).
 
-### [e2e] @validation
+### [e2e] @validation +browser
 End-to-end scenarios. Validated against the running application
 after implementation — the implementing agent never sees these.
 
-### [perf] @validation
+### [perf] @validation +code
 1. Run benchmark suite: `make bench`
 2. Agent review: check for N+1 queries, unbounded loops, missing indexes
 3. Compare results against baseline from previous sync
 
-### [ux] @satisfaction
-Threshold: 0.7
+### [arch] @validation +code +axioms
+Architecture review. Checks decomposition, service contracts,
+and layer boundaries against the system's architectural rules.
+
+### [ux] @satisfaction(0.7) +browser
 AI judge opens the application in a browser, performs the described
 scenario, and evaluates usability, readability, and intuitiveness.
 
-### [scenario] @validation @satisfaction
+### [scenario] @validation @satisfaction(0.8) +browser
 When an employee accepts an order, the owner sees it in
 their dashboard within 3 seconds.
 ```
@@ -125,7 +137,7 @@ Most existing tools operate at the spec-first level. Axiomatic Engineering opera
 
 **One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy. All axiom files live in the `axioms/` directory. The entry point `axioms/main.md` is the system map — it contains the glossary, label definitions, and links to all axiom files.
 
-**Labels** are pluggable verification aspects with explicit phase annotations (`@implementation`, `@validation`). They define what kind of verification an axiom requires and which agents see the axiom's content. Labels are declared in the `## Labels` section of `main.md` and applied to axioms.
+**Labels** are pluggable verification aspects with phase annotations (`@implementation`, `@validation`, `@satisfaction`) and context markers (`+code`, `+browser`, `+api`, `+axioms`). Phases define *when* an agent runs; markers define *what* it receives. Labels are declared in the `## Labels` section of `main.md` and applied to axioms.
 
 Label placement follows a **cascade** (like CSS):
 - Label under `## Aksjomaty` in `main.md` → applies to all axioms (global)
@@ -197,8 +209,8 @@ Axiom files are loaded by following the link chain from `main.md` — only files
 The sync process follows an **orchestrator pattern**. The main process handles planning (snapshot, diff, reading axioms, consistency checks, change list generation, marker verification) and then delegates execution to isolated agents:
 
 - **Implementing agent** — receives axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only or `@satisfaction`-only labels are stripped from its context. Builds code and writes tests for `@implementation` labels.
-- **Validating agent(s)** — receive axioms filtered to `@validation` labels. For `@validation`-only (holdout) labels, the agent has no access to source code — it evaluates system behavior from the outside.
-- **Satisfaction agent (AI judge)** — receives `@satisfaction` scenarios as prompts. Interacts with the running application (browser automation, API calls) and evaluates it subjectively, returning a score (0.0–1.0) with justification. Has no access to source code or other agents' reasoning.
+- **Validating agent(s)** — one per label, each receiving only the resources declared by its `+` markers. An agent with `+code` reviews source code; one with `+browser` tests the running application; one without either evaluates behavior from the outside.
+- **Satisfaction agent (AI judge)** — receives `@satisfaction` scenarios as prompts and resources per `+` markers. Evaluates the application subjectively, returning a score (0.0–1.0) with justification. Score must meet the threshold from `@satisfaction(threshold)` or the cycle repeats.
 
 If validation or satisfaction review fails, the implementing agent receives the error/feedback description but still never sees holdout or satisfaction blocks — it must fix the issue based on the description alone. The cycle repeats until all checks pass.
 
