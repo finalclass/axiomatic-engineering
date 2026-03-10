@@ -1,116 +1,116 @@
-# Synchronizacja aksjomatów z kodem
+# Syncing axioms with code
 
-## Filozofia
+## Philosophy
 
-Programista pracuje nad aksjomatami, nie nad kodem. Aksjomaty to deklaratywny opis systemu — źródło prawdy. Kod jest pochodną aksjomatów.
+The developer works on axioms, not on code. Axioms are a declarative description of the system — the source of truth. Code is derived from axioms.
 
-Workflow: edytuj aksjomaty → uruchom `/axioms-sync` → kod się aktualizuje.
+Workflow: edit axioms → run `/axioms-sync` → code updates.
 
-## Struktura folderów
+## Directory structure
 
-- `axioms/` — aksjomaty systemu (tu programista pracuje): `main.md` (entry point), `technology.md`, `data-protection.md`, `ui-template.html`, oraz foldery `*-client/` (np. `landing-client/`, `login-client/`, `patient-client/`, `therapist-client/`, `admin-client/`)
-- `code/` — kod systemu (generowany z aksjomatów). Utwórz jeśli nie istnieje.
-- `data/` — dane runtime (bazy danych, uploady itp.). Nie zarządzane przez sync.
-- `.axioms/` — folder roboczy sync (tymczasowe pliki, snapshoty). Utwórz jeśli nie istnieje.
-  - `.axioms/current/` — kopia aksjomatów z bieżącego uruchomienia (tworzona na starcie sync)
-  - `.axioms/freeze/` — snapshot aksjomatów z ostatniego sync (do diffów)
+- `axioms/` — system axioms (where the developer works): `main.md` (entry point), `technology.md`, `data-protection.md`, `ui-template.html`, and `*-client/` folders (e.g., `landing-client/`, `login-client/`, `patient-client/`, `therapist-client/`, `admin-client/`)
+- `code/` — system code (generated from axioms). Create if it doesn't exist.
+- `data/` — runtime data (databases, uploads, etc.). Not managed by sync.
+- `.axioms/` — sync working directory (temporary files, snapshots). Create if it doesn't exist.
+  - `.axioms/current/` — copy of axioms from the current run (created at sync start)
+  - `.axioms/freeze/` — snapshot of axioms from the last sync (for diffs)
 
-Twoje zadanie: doprowadzić kod w `code/` do zgodności z aksjomatami.
+Your task: bring the code in `code/` into compliance with the axioms.
 
-## Format aksjomatów
+## Axiom format
 
-### Plik główny: `axioms/main.md`
+### Main file: `axioms/main.md`
 
-`axioms/main.md` to mapa systemu — zawiera słownik, definicje labeli i linki do plików aksjomatów. Sam NIE zawiera aksjomatów.
+`axioms/main.md` is the system map — it contains the glossary, label definitions, and links to axiom files. It does NOT contain axioms itself.
 
-Struktura:
+Structure:
 ```
-# Nazwa systemu
+# System name
 
-## Słownik
-- **Termin** - definicja pojęcia...
-- **satisfaction-level** - 0.7
+## Glossary
+- **Term** — definition of concept...
+- **satisfaction-level** — 0.7
 
-## Labele
+## Labels
 ### [test] @implementation @validation +code
-Opis/instrukcje dla labela test
+Description/instructions for the test label
 
 ### [scenario] @validation +browser
-Scenariusze behawioralne. Walidowane po implementacji.
+Behavioral scenarios. Validated after implementation.
 
 ### [security] @validation +code +api
-Opis/instrukcje dla labela security
+Description/instructions for the security label
 
 ### [ux] @satisfaction(satisfaction-level) +browser
-Weryfikacja użyteczności interfejsu.
+Interface usability verification.
 
-## Aksjomaty
+## Axioms
 [lint]
-- [Ochrona danych](./data-protection.md)
+- [Data protection](./data-protection.md)
 - [Booking](./patient-client/booking.md)
 ```
 
-Sekcja "## Słownik":
-- Zawiera definicje pojęć domenowych w formacie `**Termin** - opis`
-- Pojęcia ze słownika NIE SĄ aksjomatami — nie generuj dla nich zmian, testów ani implementacji
-- Słownik służy do rozumienia znaczenia terminów używanych w aksjomatach
-- **Wartości słownikowe w labelach:** Jeśli argument `@satisfaction()` nie jest liczbą, traktuj go jako klucz słownikowy. Np. `@satisfaction(satisfaction-level)` → szuka `**satisfaction-level**` w słowniku i używa jego wartości liczbowej. Jeśli klucz nie istnieje w słowniku — błąd spójności (Krok 2).
+"## Glossary" section:
+- Contains domain term definitions in the format `**Term** — description`
+- Glossary entries are NOT axioms — do not generate changes, tests, or implementations for them
+- The glossary serves to understand the meaning of terms used in axioms
+- **Glossary values in labels:** If the `@satisfaction()` argument is not a number, treat it as a glossary key. E.g., `@satisfaction(satisfaction-level)` → looks up `**satisfaction-level**` in the glossary and uses its numeric value. If the key doesn't exist in the glossary — consistency error (Step 2).
 
-Sekcja "## Labele":
-- Definicje labeli w formacie `### [nazwa-labela] @fazy...`
-- Każdy label ma opis/instrukcje pod headingiem
-- Labele określają wymagane działanie dla aksjomatu (np. pisanie testów, przegląd bezpieczeństwa)
-- Label może definiować pipeline weryfikacyjny: konkretne komendy do uruchomienia, model AI do użycia, narzędzia statyczne
-- **Fazy labela:** Po nazwie labela w headingu podaje się jedną lub więcej faz: `@implementation`, `@validation`, `@satisfaction`. Fazy określają *kiedy* uruchomić agenta dla tego labela:
-  - `@implementation` — bloki z tym labelem trafiają do agenta implementującego (Krok 5)
-  - `@validation` — bloki trafiają do agenta walidującego (Krok 6)
-  - `@satisfaction(próg)` — bloki trafiają do agenta-sędziego (Krok 7). Agent ocenia doświadczenie w skali 0.0–1.0. Próg to minimalny wymagany score — może być liczbą (`@satisfaction(0.8)`) lub kluczem ze słownika (`@satisfaction(satisfaction-level)`). Domyślnie `@satisfaction` = `@satisfaction(0.7)`.
-  - Label z oboma fazami (`@implementation @validation`) — widoczny dla obu agentów (np. `[test]` — TDD w implementacji + weryfikacja)
-  - Label tylko z `@validation` — ukryty przed agentem implementującym (holdout). Agent buduje software bez wiedzy o tych kryteriach walidacyjnych. Działa jak holdout set w ML.
-  - Label tylko z `@satisfaction` — scenariusz nie generuje kodu ani testów. Jest promptem dla AI-sędziego, który wchodzi w interakcję z działającą aplikacją i ocenia ją subiektywnie. To jest walidacja tego, czego nie da się sprawdzić deterministycznym testem: UX, czytelność, intuicyjność, ogólna jakość.
-  - Label bez żadnej fazy — **błąd**. Sync zatrzymuje się w Kroku 2 (spójność) z komunikatem: "Label `[x]` nie ma zdefiniowanej fazy (@implementation / @validation / @satisfaction)."
-- **Znaczniki kontekstu (`+`):** Po fazach można podać znaczniki kontekstu, które określają *co* agent dostaje. Każdy agent zawsze otrzymuje swój aksjomat (ten z którego wynika label). Dostępne znaczniki:
-  - `+code` — dostęp do kodu źródłowego w `code/`
-  - `+axioms` — dostęp do wszystkich aksjomatów systemu (nie tylko swojego)
-  - `+browser` — dostęp do przeglądarki / działającej aplikacji (browser automation)
-  - `+api` — dostęp do endpointów HTTP (curl, requesty)
-  - Brak znaczników = agent dostaje tylko swój aksjomat i instrukcje labela
-- **Izolacja agentów:** Każdy label w fazach weryfikacji i satisfaction uruchamia **osobnego agenta** z kontekstem określonym przez znaczniki `+`. Proces główny (Kroki 0–4) pełni rolę orkiestratora — czyta aksjomaty, buduje plan, filtruje kontekst i deleguje pracę. Agent implementujący NIE widzi bloków z labeli `@validation`-only ani `@satisfaction`-only. Agent weryfikujący NIE widzi procesu myślowego agenta implementującego. Znaczniki `+` kontrolują co każdy agent widzi — np. agent `[ux-validate]` z `+browser` bez `+code` nie może oszukać sprawdzając HTML zamiast oceniać UI.
+"## Labels" section:
+- Label definitions in the format `### [label-name] @phases...`
+- Each label has a description/instructions below the heading
+- Labels define the required action for an axiom (e.g., writing tests, security review)
+- A label can define a verification pipeline: specific commands to run, AI model to use, static tools
+- **Label phases:** After the label name in the heading, one or more phases are specified: `@implementation`, `@validation`, `@satisfaction`. Phases determine *when* to run an agent for this label:
+  - `@implementation` — blocks with this label go to the implementing agent (Step 5)
+  - `@validation` — blocks go to the validating agent (Step 6)
+  - `@satisfaction(threshold)` — blocks go to the judge agent (Step 7). The agent evaluates the experience on a 0.0–1.0 scale. The threshold is the minimum required score — can be a number (`@satisfaction(0.8)`) or a glossary key (`@satisfaction(satisfaction-level)`). Default: `@satisfaction` = `@satisfaction(0.7)`.
+  - A label with both phases (`@implementation @validation`) — visible to both agents (e.g., `[test]` — TDD in implementation + verification)
+  - A label with `@validation` only — hidden from the implementing agent (holdout). The agent builds software without knowledge of these validation criteria. Works like a holdout set in ML.
+  - A label with `@satisfaction` only — the scenario does not generate code or tests. It is a prompt for the AI judge, who interacts with the running application and evaluates it subjectively. This validates what cannot be checked by a deterministic test: UX, readability, intuitiveness, overall quality.
+  - A label without any phase — **error**. Sync stops at Step 2 (consistency) with the message: "Label `[x]` has no defined phase (@implementation / @validation / @satisfaction)."
+- **Context markers (`+`):** After phases, context markers can be specified to determine *what* the agent receives. Every agent always receives its own axiom (the one the label originates from). Available markers:
+  - `+code` — access to source code in `code/`
+  - `+axioms` — access to all system axioms (not just its own)
+  - `+browser` — access to a browser / running application (browser automation)
+  - `+api` — access to HTTP endpoints (curl, requests)
+  - No markers = agent receives only its axiom and label instructions
+- **Agent isolation:** Each label in the verification and satisfaction phases launches a **separate agent** with context determined by `+` markers. The main process (Steps 0–4) serves as the orchestrator — reads axioms, builds the plan, filters context, and delegates work. The implementing agent does NOT see blocks from `@validation`-only or `@satisfaction`-only labels. The validating agent does NOT see the implementing agent's reasoning. The `+` markers control what each agent sees — e.g., a `[ux-validate]` agent with `+browser` but without `+code` cannot cheat by inspecting HTML instead of evaluating the UI.
 
-### Pliki aksjomatów
+### Axiom files
 
-**Jeden plik = jeden aksjomat.** Każdy aksjomat to plik Markdown opisujący jedno spójne zagadnienie: stronę, funkcjonalność, stack technologiczny, politykę ochrony danych.
+**One file = one axiom.** Each axiom is a Markdown file describing one cohesive concern: a page, a feature, a technology stack, a data protection policy.
 
-Struktura pliku aksjomatu:
+Axiom file structure:
 ```
-# Nazwa aksjomatu
+# Axiom name
 [label1]
 
-Treść aksjomatu — narracyjny opis zagadnienia.
+Axiom content — narrative description of the concern.
 
-## Sekcja
+## Section
 [label2]
 
-Dalsza treść...
+Further content...
 ```
 
-Składnia:
-- Heading `#` to nazwa aksjomatu
-- Heading `##` to sekcje wewnątrz aksjomatu
-- Labele w nawiasach kwadratowych w linii pod headingiem: `[test] [security]`
-- Treść opisowa poniżej (narracja, nie checklist)
-- Referencja do innego aksjomatu: `[Nazwa](./plik.md)` lub `[Sekcja](./plik.md#sekcja)` (standardowy markdown link)
-- Namespace ID aksjomatu: `{folder}/{plik}.md` (np. `patient-client/booking.md`). Dla sekcji: `{folder}/{plik}.md#{heading-slug}` (np. `data-protection.md#technical-security`)
+Syntax:
+- Heading `#` is the axiom name
+- Heading `##` defines sections within the axiom
+- Labels in square brackets on the line below the heading: `[test] [security]`
+- Descriptive content below (narrative, not checklist)
+- Reference to another axiom: `[Name](./file.md)` or `[Section](./file.md#section)` (standard markdown link)
+- Axiom namespace ID: `{folder}/{file}.md` (e.g., `patient-client/booking.md`). For sections: `{folder}/{file}.md#{heading-slug}` (e.g., `data-protection.md#technical-security`)
 
-### Kaskada labeli
+### Label cascade
 
-Labele dziedziczą w dół (jak CSS):
-- Label pod `## Aksjomaty` w `main.md` → dotyczy WSZYSTKICH aksjomatów (globalny)
-- Label na `#` (nagłówek pliku aksjomatu) → dotyczy całego pliku
-- Label na `##` (sekcja) → dotyczy tej sekcji
-- Każdy poziom dziedziczy labele z poziomu wyższego
+Labels inherit downward (like CSS):
+- Label under `## Axioms` in `main.md` → applies to ALL axioms (global)
+- Label on `#` (axiom file heading) → applies to the entire file
+- Label on `##` (section) → applies to that section
+- Each level inherits labels from the level above
 
-Przykład — plik `data-protection.md`:
+Example — file `data-protection.md`:
 ```markdown
 # Data protection
 [rodo]
@@ -128,276 +128,276 @@ Passwords are hashed with bcrypt or argon2.
 The system displays privacy policy before registration.
 ```
 
-W tym przykładzie: cały plik ma `[rodo]`. Sekcja "Technical security" ma `[rodo] [pentest] [test]` (dziedziczone + własne). Sekcja "Privacy policy" ma `[rodo] [ux-validate]`. Jeśli w `main.md` pod `## Aksjomaty` jest `[lint]`, to wszystkie sekcje mają dodatkowo `[lint]`.
+In this example: the entire file has `[rodo]`. The "Technical security" section has `[rodo] [pentest] [test]` (inherited + own). The "Privacy policy" section has `[rodo] [ux-validate]`. If `main.md` has `[lint]` under `## Axioms`, all sections additionally have `[lint]`.
 
-## Markery @axiom w kodzie
+## @axiom markers in code
 
-Każdy fragment kodu w `code/` musi wskazywać aksjomat, z którego wynika, za pomocą markerów `@axiom`.
+Every code fragment in `code/` must point to the axiom it derives from using `@axiom` markers.
 
-### Format markerów
+### Marker format
 
-Markery używają namespace ID aksjomatu (ścieżka pliku + anchor z headingu):
+Markers use the axiom namespace ID (file path + heading anchor):
 
 HTML:
 ```html
-<!-- @axiom: landing-client/main.md#sekcja-hero -->
-...kod wynikający z aksjomatu...
-<!-- /@axiom: landing-client/main.md#sekcja-hero -->
+<!-- @axiom: landing-client/main.md#hero-section -->
+...code derived from the axiom...
+<!-- /@axiom: landing-client/main.md#hero-section -->
 ```
 
 Bash:
 ```bash
 # @axiom: technology.md#deploy-script
-...kod...
+...code...
 # /@axiom: technology.md#deploy-script
 ```
 
 CSS:
 ```css
-/* @axiom: landing-client/main.md#sekcja-hero */
+/* @axiom: landing-client/main.md#hero-section */
 ...style...
-/* /@axiom: landing-client/main.md#sekcja-hero */
+/* /@axiom: landing-client/main.md#hero-section */
 ```
 
 JS:
 ```javascript
 // @axiom: login-client/registration.md#form-validation
-...kod...
+...code...
 // /@axiom: login-client/registration.md#form-validation
 ```
 
 PHP:
 ```php
-// @axiom: api.md#endpoint-api
-...kod...
-// /@axiom: api.md#endpoint-api
+// @axiom: api.md#api-endpoint
+...code...
+// /@axiom: api.md#api-endpoint
 ```
 
-### Zasady markerów
+### Marker rules
 
-1. Markery mogą być zagnieżdżone — np. formularz rejestracji (`@axiom: login-client/registration.md#formularz-rejestracji-pacjenta`) może zawierać wewnątrz `@axiom: data-protection.md#zgoda-przetwarzanie` dla checkboxa.
-2. Każdy opening marker (`@axiom: X`) musi mieć matching closing marker (`/@axiom: X`).
-3. Nazwy w markerach to namespace ID (ścieżka pliku + anchor), muszą odpowiadać istniejącym aksjomatom.
-4. W blokach `{{content}}` nie powinno być kodu poza markerami @axiom (orphaned code).
-5. Pliki w `code/tests/` nie wymagają markerów.
-6. Layout files (`layout-*.html`) mają markery na nawigacji i strukturze, nie na `{{yield content}}`.
+1. Markers can be nested — e.g., a registration form (`@axiom: login-client/registration.md#patient-registration-form`) can contain `@axiom: data-protection.md#processing-consent` inside for a checkbox.
+2. Every opening marker (`@axiom: X`) must have a matching closing marker (`/@axiom: X`).
+3. Names in markers are namespace IDs (file path + anchor) and must correspond to existing axioms.
+4. In `{{content}}` blocks there should be no code outside @axiom markers (orphaned code).
+5. Files in `code/tests/` do not require markers.
+6. Layout files (`layout-*.html`) have markers on navigation and structure, not on `{{yield content}}`.
 
-### Aksjomaty deklaratywne (bez markerów w kodzie)
+### Declarative axioms (no markers in code)
 
-Niektóre aksjomaty opisują zasady, architekturę lub wykluczenia — nie mają bezpośredniego odzwierciedlenia w kodzie i NIE wymagają markerów `@axiom`. Takie aksjomaty powinny być wymienione w pliku aksjomatów projektu.
+Some axioms describe rules, architecture, or exclusions — they have no direct representation in code and do NOT require `@axiom` markers. Such axioms should be listed in the project's axiom file.
 
-## Tryby uruchomienia
+## Run modes
 
-### Tryb domyślny (diff)
-Domyślnie axioms-sync działa w trybie diff — synchronizuje tylko aksjomaty, które zmieniły się od ostatniego uruchomienia.
+### Default mode (diff)
+By default, axioms-sync works in diff mode — it only syncs axioms that have changed since the last run.
 
-### Tryb pełny
-Aby wymusić pełną synchronizację (wszystkie aksjomaty, nie tylko diff), użytkownik musi przekazać argument `--full` lub powiedzieć "pełny sync" / "full sync".
+### Full mode
+To force a full sync (all axioms, not just the diff), the user must pass the `--full` argument or say "full sync".
 
-## Procedura
+## Procedure
 
-Wykonaj poniższe kroki SEKWENCYJNIE. Nie przechodź do następnego kroku bez zakończenia poprzedniego.
+Execute the following steps SEQUENTIALLY. Do not proceed to the next step without completing the previous one.
 
-### Krok 0: Snapshot i diff
+### Step 0: Snapshot and diff
 
-1. Utwórz folder `.axioms/` jeśli nie istnieje.
-2. **Snapshot bieżących aksjomatów:** Skopiuj pliki aksjomatowe z `axioms/` (`.md`, `ui-template.html`, foldery `*-client/`) do `.axioms/current/` (wyczyść folder przed kopiowaniem). To jest snapshot aksjomatów z tego uruchomienia — dalsze kroki pracują na plikach z `.axioms/current/`.
-3. Sprawdź czy istnieje folder `.axioms/freeze/`.
-4. **Jeśli `.axioms/freeze/` NIE istnieje** (pierwsze uruchomienie):
-   - Traktuj jako pełny sync — wszystkie aksjomaty będą na liście zmian.
-5. **Jeśli `.axioms/freeze/` istnieje** i tryb = diff (domyślny):
-   - Porównaj `.axioms/current/` z `.axioms/freeze/` za pomocą `diff -ru`.
-   - Jeśli diff zwraca pusty wynik — brak zmian, zakończ sync z komunikatem "Brak zmian w aksjomatach."
-   - Jeśli diff zwraca różnice — sparsuj wynik diffa:
-     - Nowe pliki → nowe aksjomaty (dodane).
-     - Usunięte pliki → usunięte aksjomaty.
-     - Zmienione linie (`+`/`-`) → zidentyfikuj, które aksjomaty (pliki/sekcje) zostały zmodyfikowane na podstawie kontekstu diffa.
-   - Dalsze kroki (lista zmian, implementacja) dotyczą TYLKO zmienionych aksjomatów.
-6. **Jeśli tryb = full** (`--full`):
-   - Ignoruj `.axioms/freeze/`, traktuj wszystkie aksjomaty.
-7. Zapisz snapshot do freeze: Skopiuj zawartość `.axioms/current/` do `.axioms/freeze/` (nadpisz).
+1. Create the `.axioms/` folder if it doesn't exist.
+2. **Snapshot current axioms:** Copy axiom files from `axioms/` (`.md`, `ui-template.html`, `*-client/` folders) to `.axioms/current/` (clear the folder before copying). This is the snapshot of axioms from this run — subsequent steps work on files from `.axioms/current/`.
+3. Check if the `.axioms/freeze/` folder exists.
+4. **If `.axioms/freeze/` does NOT exist** (first run):
+   - Treat as a full sync — all axioms will be on the change list.
+5. **If `.axioms/freeze/` exists** and mode = diff (default):
+   - Compare `.axioms/current/` with `.axioms/freeze/` using `diff -ru`.
+   - If diff returns empty — no changes, end sync with the message "No changes in axioms."
+   - If diff returns differences — parse the diff output:
+     - New files → new axioms (added).
+     - Deleted files → deleted axioms.
+     - Changed lines (`+`/`-`) → identify which axioms (files/sections) were modified based on diff context.
+   - Subsequent steps (change list, implementation) apply ONLY to changed axioms.
+6. **If mode = full** (`--full`):
+   - Ignore `.axioms/freeze/`, process all axioms.
+7. Save snapshot to freeze: Copy contents of `.axioms/current/` to `.axioms/freeze/` (overwrite).
 
-### Krok 1: Wczytaj aksjomaty
+### Step 1: Load axioms
 
-1. Przeczytaj `axioms/main.md`.
-2. Znajdź wszystkie includy — linki w formacie `[Nazwa](./plik.md)`. Przeczytaj te pliki.
-   - Każdy includowany plik to osobny aksjomat.
-   - **Rekurencyjnie:** jeśli includowany plik sam zawiera linki do innych plików `.md` (ścieżki względne), przeczytaj też te pliki. Powtarzaj aż nie ma nowych linków.
-   - NIE skanuj plików w folderze, które nie są osiągalne przez łańcuch linków z `main.md`.
-3. Sparsuj aksjomaty ze wszystkich wczytanych plików: wyodrębnij nazwy (heading `#`), sekcje (heading `##`), labele (`[...]`), referencje, treść. Uwzględnij kaskadę labeli (globalny z `## Aksjomaty`, plik `#`, sekcja `##`).
-4. Sparsuj definicje labeli z sekcji "## Labele".
+1. Read `axioms/main.md`.
+2. Find all includes — links in the format `[Name](./file.md)`. Read those files.
+   - Each included file is a separate axiom.
+   - **Recursively:** if an included file itself contains links to other `.md` files (relative paths), read those files too. Repeat until there are no new links.
+   - Do NOT scan files in a folder that are not reachable through the link chain from `main.md`.
+3. Parse axioms from all loaded files: extract names (heading `#`), sections (heading `##`), labels (`[...]`), references, content. Account for the label cascade (global from `## Axioms`, file `#`, section `##`).
+4. Parse label definitions from the "## Labels" section.
 
-### Krok 2: Sprawdź spójność aksjomatów
+### Step 2: Check axiom consistency
 
-Sprawdź:
-- Czy są aksjomaty wykluczające się wzajemnie (sprzeczne wymagania)?
-- Czy wszystkie referencje `[Nazwa](#anchor)` wskazują na istniejące aksjomaty?
-- Czy są duplikaty nazw aksjomatów?
-- Czy wszystkie linki i ścieżki (np. `./ui-template.html`) wskazują na istniejące pliki?
+Check:
+- Are there mutually exclusive axioms (contradictory requirements)?
+- Do all references `[Name](#anchor)` point to existing axioms?
+- Are there duplicate axiom names?
+- Do all links and paths (e.g., `./ui-template.html`) point to existing files?
 
-Jeśli znajdziesz problemy — ZATRZYMAJ SIĘ i zgłoś je użytkownikowi. Nie kontynuuj bez rozwiązania sprzeczności.
+If you find problems — STOP and report them to the user. Do not continue without resolving contradictions.
 
-### Krok 3: Sporządź listę zmian i checklistę weryfikacyjną
+### Step 3: Prepare the change list and verification checklist
 
-Jeśli tryb = diff, wypisz najpierw podsumowanie zmian w aksjomatach:
+If mode = diff, first output a summary of axiom changes:
 ```
-## Zmiany w aksjomatach od ostatniego sync
-- Dodane: ...
-- Usunięte: ...
-- Zmodyfikowane: ...
-```
-
-**A) Kontekst implementacyjny (dla Kroku 5):**
-
-Dla każdego aksjomatu w zakresie (diff lub full):
-1. Sprawdź czy kod w `code/` jest zgodny z aksjomatem.
-2. Jeśli nie — zapisz co trzeba zmienić.
-3. **Filtruj po fazach:** Z treści aksjomatów usuń bloki oznaczone labelami, które mają tylko `@validation` lub tylko `@satisfaction` (bez `@implementation`). Agent implementujący nie może ich widzieć.
-4. Uwzględnij labele `@implementation` aksjomatu i dodaj odpowiednie pozycje do listy zmian (np. "napisz testy" dla `[test]`, "napisz test e2e" dla `[e2e]`).
-
-Wypisz listę zmian w formacie:
-
-```
-## Lista zmian (implementacja)
-
-### Nazwa aksjomatu — krótki opis
-- [ ] Co trzeba zrobić
-- [ ] Jakie testy napisać (jeśli [test])
+## Axiom changes since last sync
+- Added: ...
+- Deleted: ...
+- Modified: ...
 ```
 
-**B) Kontekst walidacyjny (dla Kroku 6):**
+**A) Implementation context (for Step 5):**
 
-Na podstawie labeli znalezionych w aksjomatach oraz infrastruktury testowej projektu, sporządź dwie listy:
+For each axiom in scope (diff or full):
+1. Check if the code in `code/` complies with the axiom.
+2. If not — record what needs to change.
+3. **Filter by phases:** Remove blocks tagged with labels that have only `@validation` or only `@satisfaction` (without `@implementation`) from axiom content. The implementing agent must not see them.
+4. Include the axiom's `@implementation` labels and add corresponding items to the change list (e.g., "write tests" for `[test]`, "write e2e test" for `[e2e]`).
 
-1. **Komendy do uruchomienia** — sprawdź jakie test runnery istnieją w projekcie (np. `Makefile`, `package.json`, `playwright.config.*`, `dune` test stanzas) i zapisz komendy.
-2. **Scenariusze holdout** — zbierz bloki aksjomatów oznaczone labelami `@validation`-only (bez `@implementation`). Każdy taki scenariusz to kryterium walidacyjne, które agent walidujący sprawdza przeciwko działającej aplikacji/kodowi, **bez dostępu do kodu źródłowego implementacji**.
+Output the change list in the format:
 
-Wypisz w formacie:
 ```
-## Checklista weryfikacyjna
-- [ ] `komenda budowania` (np. dune build)
-- [ ] `komenda testów unit/integracyjnych` (np. dune exec test/smock_test.exe)
-- [ ] `komenda testów e2e` (np. npx playwright test) — jeśli są labele [e2e]
-- [ ] przegląd bezpieczeństwa — jeśli są labele [security]
+## Change list (implementation)
 
-## Scenariusze holdout
-- [ ] Scenariusz X (z aksjomatu Y)
-- [ ] Scenariusz Z (z aksjomatu W)
+### Axiom name — short description
+- [ ] What needs to be done
+- [ ] What tests to write (if [test])
 ```
 
-**C) Kontekst satisfaction (dla Kroku 7):**
+**B) Validation context (for Step 6):**
 
-Zbierz bloki aksjomatów oznaczone labelami `@satisfaction`. Każdy taki blok to prompt dla AI-sędziego — opis scenariusza do wykonania i oceny na działającej aplikacji. Scenariusze `@satisfaction` NIE generują kodu ani testów.
+Based on labels found in axioms and the project's test infrastructure, prepare two lists:
 
-Dla każdego scenariusza odczytaj:
-1. **Prompt** — treść aksjomatu (opis co sprawdzić, jak ocenić)
-2. **Próg** — z `@satisfaction(próg)` w definicji labela (domyślnie 0.7)
-3. **Kontekst** — znaczniki `+` z definicji labela (np. `+browser` = browser automation)
+1. **Commands to run** — check what test runners exist in the project (e.g., `Makefile`, `package.json`, `playwright.config.*`, `dune` test stanzas) and record the commands.
+2. **Holdout scenarios** — collect axiom blocks tagged with `@validation`-only labels (without `@implementation`). Each such scenario is a validation criterion that the validating agent checks against the running application/code, **without access to implementation source code**.
 
-Wypisz w formacie:
+Output in the format:
 ```
-## Scenariusze satisfaction
-- [ ] Scenariusz X (z aksjomatu Y) — próg: 0.8
-- [ ] Scenariusz Z (z aksjomatu W) — próg: 0.7
+## Verification checklist
+- [ ] `build command` (e.g., dune build)
+- [ ] `unit/integration test command` (e.g., dune exec test/smock_test.exe)
+- [ ] `e2e test command` (e.g., npx playwright test) — if there are [e2e] labels
+- [ ] security review — if there are [security] labels
+
+## Holdout scenarios
+- [ ] Scenario X (from axiom Y)
+- [ ] Scenario Z (from axiom W)
 ```
 
-Zapisz obie listy do `.axioms/sync-result.md` (data, tryb diff/full, podsumowanie zmian, kontekst implementacyjny, kontekst walidacyjny).
+**C) Satisfaction context (for Step 7):**
 
-### Krok 4: Weryfikacja markerów @axiom
+Collect axiom blocks tagged with `@satisfaction` labels. Each such block is a prompt for the AI judge — a description of a scenario to execute and evaluate on the running application. `@satisfaction` scenarios do NOT generate code or tests.
 
-1. Sparsuj wszystkie pliki w `code/` (poza `tests/`).
-2. Sprawdź parowanie markerów: każdy `@axiom: X` musi mieć `/@axiom: X`.
-3. Waliduj nazwy: każda nazwa w markerze musi odpowiadać istniejącemu aksjomatowi.
-4. Sprawdź orphaned code: w blokach `{{content}}` nie powinno być kodu poza markerami @axiom.
-5. Jeśli są problemy — napraw je przed przejściem do implementacji.
+For each scenario, read:
+1. **Prompt** — axiom content (description of what to check, how to evaluate)
+2. **Threshold** — from `@satisfaction(threshold)` in the label definition (default 0.7)
+3. **Context** — `+` markers from the label definition (e.g., `+browser` = browser automation)
 
-### Krok 5: Implementacja (agent implementujący)
+Output in the format:
+```
+## Satisfaction scenarios
+- [ ] Scenario X (from axiom Y) — threshold: 0.8
+- [ ] Scenario Z (from axiom W) — threshold: 0.7
+```
 
-Deleguj implementację do **osobnego agenta**. Od razu, nie czekaj na potwierdzenie użytkownika.
+Save both lists to `.axioms/sync-result.md` (date, diff/full mode, change summary, implementation context, validation context).
 
-Agent implementujący otrzymuje:
-- Kontekst implementacyjny z Kroku 3A (lista zmian + przefiltrowane aksjomaty **bez bloków `@validation`-only**)
-- Dostęp do `code/` i infrastruktury projektu
-- Definicje labeli `@implementation` (np. `[test]`, `[e2e]`)
+### Step 4: Verify @axiom markers
 
-Agent implementujący NIE otrzymuje:
-- Bloków aksjomatów oznaczonych labelami `@validation`-only (bez `@implementation`)
-- Kontekstu walidacyjnego z Kroku 3B
+1. Parse all files in `code/` (except `tests/`).
+2. Check marker pairing: every `@axiom: X` must have a `/@axiom: X`.
+3. Validate names: every name in a marker must correspond to an existing axiom.
+4. Check for orphaned code: in `{{content}}` blocks there should be no code outside @axiom markers.
+5. If there are problems — fix them before proceeding to implementation.
 
-Zadanie agenta:
-1. Implementuj zmiany z listy zmian, jedna po drugiej. Cały kod trafia do `code/`. Przy tworzeniu/modyfikacji plików — zawsze dodawaj markery `@axiom` wskazujące aksjomat źródłowy.
-2. Po każdej zmianie oznacz ją jako zrobioną.
-3. Dla aksjomatów z labelem `[test]` — napisz testy ZANIM napiszesz implementację (TDD).
-4. Dla aksjomatów z labelem `[e2e]` — napisz test e2e pokrywający cały flow.
+### Step 5: Implementation (implementing agent)
 
-### Krok 6: Weryfikacja (agent walidujący)
+Delegate implementation to a **separate agent**. Immediately, do not wait for user confirmation.
 
-Deleguj weryfikację do **osobnego agenta** (lub osobnych agentów per label). Wykonaj po zakończeniu Kroku 5.
+The implementing agent receives:
+- Implementation context from Step 3A (change list + filtered axioms **without `@validation`-only blocks**)
+- Access to `code/` and project infrastructure
+- `@implementation` label definitions (e.g., `[test]`, `[e2e]`)
 
-**A) Weryfikacja standardowa:**
-1. Uruchom każdą komendę z checklisty weryfikacyjnej (Krok 3B). Nie pomijaj żadnej.
-2. **Każdy label odpalaj jako osobnego agenta** z czystym kontekstem. Agent otrzymuje: swój aksjomat i instrukcje labela + zasoby określone przez znaczniki `+` (np. `+code` = kod źródłowy, `+browser` = przeglądarka, `+api` = endpointy HTTP, `+axioms` = wszystkie aksjomaty). NIE otrzymuje historii generowania ani procesu myślowego agenta implementującego. Jeśli label definiuje model — użyj tego modelu.
+The implementing agent does NOT receive:
+- Axiom blocks tagged with `@validation`-only labels (without `@implementation`)
+- Validation context from Step 3B
 
-**B) Weryfikacja `@validation`-only (holdout):**
-Dla każdego scenariusza `@validation`-only z Kroku 3B:
-1. Agent walidujący otrzymuje: treść scenariusza + zasoby wg znaczników `+` z definicji labela.
-2. Jeśli label **nie ma** `+code` — agent NIE otrzymuje kodu źródłowego, ocenia wyłącznie zachowanie systemu z zewnątrz.
-3. Jeśli label **ma** `+code` (np. `[architecture-check]`) — agent otrzymuje kod, bo weryfikacja dotyczy struktury kodu, nie zachowania.
+Agent's task:
+1. Implement changes from the change list, one by one. All code goes into `code/`. When creating/modifying files — always add `@axiom` markers pointing to the source axiom.
+2. Mark each change as done after completing it.
+3. For axioms with the `[test]` label — write tests BEFORE writing the implementation (TDD).
+4. For axioms with the `[e2e]` label — write an e2e test covering the entire flow.
 
-**C) Naprawianie błędów:**
-1. Jeśli coś nie przechodzi (A lub B) — deleguj naprawę do agenta implementującego (z tym samym przefiltrowanym kontekstem + informacją o błędzie, ale nadal **bez bloków `@validation`-only**).
-2. Powtarzaj cykl implementacja → weryfikacja aż wszystko przechodzi.
-3. Sync kończy się dopiero gdy kod jest zgodny z aksjomatami I cała checklista weryfikacyjna (włącznie z holdout) jest zaliczona.
+### Step 6: Verification (validating agent)
 
-Jeśli po zakończeniu sync użytkownik nadal widzi błędy — to sygnał, że specyfikacja jest niekompletna (brakuje aksjomatu lub labela). Ale to już poza zakresem tego sync — wymaga edycji aksjomatów i ponownego uruchomienia.
+Delegate verification to a **separate agent** (or separate agents per label). Execute after Step 5 is complete.
 
-### Krok 7: Satisfaction review (agent-sędzia)
+**A) Standard verification:**
+1. Run every command from the verification checklist (Step 3B). Do not skip any.
+2. **Run each label as a separate agent** with a clean context. The agent receives: its axiom and label instructions + resources determined by `+` markers (e.g., `+code` = source code, `+browser` = browser, `+api` = HTTP endpoints, `+axioms` = all axioms). Does NOT receive generation history or the implementing agent's reasoning. If the label defines a model — use that model.
 
-Wykonaj po zakończeniu Kroków 5–6 (implementacja i walidacja muszą przejść). Ten krok wymaga działającej aplikacji.
+**B) `@validation`-only (holdout) verification:**
+For each `@validation`-only scenario from Step 3B:
+1. The validating agent receives: scenario content + resources per `+` markers from the label definition.
+2. If the label **does not have** `+code` — the agent does NOT receive source code, evaluating only system behavior from the outside.
+3. If the label **has** `+code` (e.g., `[architecture-check]`) — the agent receives code, because verification concerns code structure, not behavior.
 
-Jeśli nie ma labeli `@satisfaction` — pomiń ten krok.
+**C) Fixing errors:**
+1. If something fails (A or B) — delegate the fix to the implementing agent (with the same filtered context + error information, but still **without `@validation`-only blocks**).
+2. Repeat the implementation → verification cycle until everything passes.
+3. Sync ends only when the code complies with the axioms AND the entire verification checklist (including holdout) passes.
 
-Dla każdego scenariusza `@satisfaction` z Kroku 3C:
+If after sync completion the user still sees bugs — that's a signal that the specification is incomplete (a missing axiom or label). But that's outside the scope of this sync — it requires editing axioms and re-running.
 
-1. **Deleguj do osobnego agenta-sędziego.** Agent otrzymuje:
-   - Treść scenariusza (prompt z aksjomatu)
-   - Zasoby określone przez znaczniki `+` z definicji labela (np. `+browser` = browser automation, `+api` = HTTP requesty)
-2. **Agent NIE otrzymuje** (chyba że znacznik `+` jawnie to daje):
-   - Kodu źródłowego (brak `+code`)
-   - Procesu myślowego agentów implementującego i walidującego
-   - Treści aksjomatów spoza scenariusza (brak `+axioms`)
-3. **Agent wykonuje scenariusz** — wchodzi w interakcję z aplikacją jak użytkownik (klika, nawiguje, sprawdza UI) i ocenia doświadczenie.
-4. **Agent zwraca:**
+### Step 7: Satisfaction review (judge agent)
+
+Execute after Steps 5–6 are complete (implementation and validation must pass). This step requires a running application.
+
+If there are no `@satisfaction` labels — skip this step.
+
+For each `@satisfaction` scenario from Step 3C:
+
+1. **Delegate to a separate judge agent.** The agent receives:
+   - Scenario content (prompt from the axiom)
+   - Resources determined by `+` markers from the label definition (e.g., `+browser` = browser automation, `+api` = HTTP requests)
+2. **The agent does NOT receive** (unless a `+` marker explicitly grants it):
+   - Source code (no `+code`)
+   - Reasoning from the implementing and validating agents
+   - Axiom content beyond the scenario (no `+axioms`)
+3. **The agent executes the scenario** — interacts with the application like a user (clicks, navigates, checks UI) and evaluates the experience.
+4. **The agent returns:**
    - Score: 0.0–1.0
-   - Uzasadnienie: co działa, co nie, co wymaga poprawy
-   - Opcjonalnie: screenshoty, nagrania
-5. **Porównaj score z progiem.** Jeśli score < próg:
-   - Przekaż uzasadnienie agentowi implementującemu (bez treści scenariusza `@satisfaction` — agent nadal nie widzi promptu sędziego).
-   - Agent implementujący poprawia na podstawie opisu problemu.
-   - Powtórz cykl: implementacja → walidacja → satisfaction review.
-6. **Sync kończy się** dopiero gdy wszystkie scenariusze satisfaction osiągną wymagany próg (lub orkiestrator zgłosi brak postępu po N iteracjach).
+   - Justification: what works, what doesn't, what needs improvement
+   - Optionally: screenshots, recordings
+5. **Compare the score with the threshold.** If score < threshold:
+   - Pass the justification to the implementing agent (without the `@satisfaction` scenario content — the agent still doesn't see the judge's prompt).
+   - The implementing agent fixes based on the problem description.
+   - Repeat the cycle: implementation → validation → satisfaction review.
+6. **Sync ends** only when all satisfaction scenarios meet the required threshold (or the orchestrator reports no progress after N iterations).
 
-Wynik satisfaction review zapisz do `.axioms/sync-result.md`:
+Save the satisfaction review result to `.axioms/sync-result.md`:
 ```
 ## Satisfaction review
-- Scenariusz X (aksjomat Y): 0.85/1.0 ✓ (próg: 0.7)
-  Uzasadnienie: ...
-- Scenariusz Z (aksjomat W): 0.55/1.0 ✗ (próg: 0.8)
-  Uzasadnienie: ...
+- Scenario X (axiom Y): 0.85/1.0 ✓ (threshold: 0.7)
+  Justification: ...
+- Scenario Z (axiom W): 0.55/1.0 ✗ (threshold: 0.8)
+  Justification: ...
 ```
 
-## Partyjne przetwarzanie
+## Batch processing
 
-Jeśli liczba aksjomatów do przetworzenia jest duża (>20), podziel pracę na partie:
-1. Krok 2 (spójność) — zawsze na całości aksjomatów.
-2. Krok 3 (plan + filtrowanie) — po grupach (per folder/domena).
-3. Krok 5 (implementacja) — deleguj agentowi po jednym aksjomacie na raz.
-4. Krok 6 (weryfikacja) — deleguj agentowi/agentom na całości po zakończeniu implementacji.
-5. Krok 7 (satisfaction) — deleguj agentowi-sędziemu po zakończeniu weryfikacji.
+If the number of axioms to process is large (>20), split the work into batches:
+1. Step 2 (consistency) — always on the full set of axioms.
+2. Step 3 (plan + filtering) — by groups (per folder/domain).
+3. Step 5 (implementation) — delegate to the agent one axiom at a time.
+4. Step 6 (verification) — delegate to the agent(s) on the full set after implementation is complete.
+5. Step 7 (satisfaction) — delegate to the judge agent after verification is complete.
 
-## Zasady
+## Rules
 
-- Nie zmieniaj aksjomatów. Aksjomaty to źródło prawdy.
-- Jeśli aksjomat jest nierealizowalny — zgłoś to, nie implementuj obejścia.
-- Jeśli aksjomat oznaczony `[test]` — kod BEZ testu nie jest zgodny z aksjomatem.
-- Preferuj małe, atomowe commity: jeden aksjomat = jeden commit.
+- Do not modify axioms. Axioms are the source of truth.
+- If an axiom is unrealizable — report it, do not implement a workaround.
+- If an axiom is tagged `[test]` — code WITHOUT a test does not comply with the axiom.
+- Prefer small, atomic commits: one axiom = one commit.
