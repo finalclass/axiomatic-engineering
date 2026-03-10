@@ -56,13 +56,15 @@ Sekcja "## Labele":
 - Każdy label ma opis/instrukcje pod headingiem
 - Labele określają wymagane działanie dla aksjomatu (np. pisanie testów, przegląd bezpieczeństwa)
 - Label może definiować pipeline weryfikacyjny: konkretne komendy do uruchomienia, model AI do użycia, narzędzia statyczne
-- **Fazy labela:** Po nazwie labela w headingu podaje się jedną lub więcej faz: `@implementation`, `@validation`. Fazy określają widoczność bloków aksjomatu w pipeline:
+- **Fazy labela:** Po nazwie labela w headingu podaje się jedną lub więcej faz: `@implementation`, `@validation`, `@satisfaction`. Fazy określają widoczność bloków aksjomatu w pipeline:
   - `@implementation` — bloki z tym labelem trafiają do agenta implementującego (Krok 5)
   - `@validation` — bloki trafiają do agenta walidującego (Krok 6)
+  - `@satisfaction` — bloki trafiają do agenta-sędziego (Krok 7). Agent używa działającej aplikacji jak człowiek i ocenia doświadczenie w skali 0.0–1.0.
   - Label z oboma fazami (`@implementation @validation`) — widoczny dla obu agentów (np. `[test]` — TDD w implementacji + weryfikacja)
   - Label tylko z `@validation` — ukryty przed agentem implementującym (holdout). Agent buduje software bez wiedzy o tych kryteriach walidacyjnych. Działa jak holdout set w ML.
-  - Label bez żadnej fazy — **błąd**. Sync zatrzymuje się w Kroku 2 (spójność) z komunikatem: "Label `[x]` nie ma zdefiniowanej fazy (@implementation / @validation)."
-- **Izolacja agentów:** Implementacja (Krok 5) i weryfikacja (Krok 6) są delegowane do osobnych agentów z przefiltrowanym kontekstem. Proces główny (Kroki 0–4) pełni rolę orkiestratora — czyta aksjomaty, buduje plan, filtruje kontekst i deleguje pracę. Agent implementujący NIE widzi bloków z labeli `@validation`-only. Agent weryfikujący NIE widzi procesu myślowego agenta implementującego.
+  - Label tylko z `@satisfaction` — scenariusz nie generuje kodu ani testów. Jest promptem dla AI-sędziego, który wchodzi w interakcję z działającą aplikacją i ocenia ją subiektywnie. To jest walidacja tego, czego nie da się sprawdzić deterministycznym testem: UX, czytelność, intuicyjność, ogólna jakość.
+  - Label bez żadnej fazy — **błąd**. Sync zatrzymuje się w Kroku 2 (spójność) z komunikatem: "Label `[x]` nie ma zdefiniowanej fazy (@implementation / @validation / @satisfaction)."
+- **Izolacja agentów:** Implementacja (Krok 5), weryfikacja (Krok 6) i satisfaction review (Krok 7) są delegowane do osobnych agentów z przefiltrowanym kontekstem. Proces główny (Kroki 0–4) pełni rolę orkiestratora — czyta aksjomaty, buduje plan, filtruje kontekst i deleguje pracę. Agent implementujący NIE widzi bloków z labeli `@validation`-only ani `@satisfaction`-only. Agent weryfikujący NIE widzi procesu myślowego agenta implementującego. Agent-sędzia (satisfaction) NIE widzi kodu źródłowego — ocenia wyłącznie działającą aplikację.
 
 ### Pliki aksjomatów
 
@@ -239,7 +241,7 @@ Jeśli tryb = diff, wypisz najpierw podsumowanie zmian w aksjomatach:
 Dla każdego aksjomatu w zakresie (diff lub full):
 1. Sprawdź czy kod w `code/` jest zgodny z aksjomatem.
 2. Jeśli nie — zapisz co trzeba zmienić.
-3. **Filtruj po fazach:** Z treści aksjomatów usuń bloki oznaczone labelami, które mają tylko `@validation` (bez `@implementation`). Agent implementujący nie może ich widzieć.
+3. **Filtruj po fazach:** Z treści aksjomatów usuń bloki oznaczone labelami, które mają tylko `@validation` lub tylko `@satisfaction` (bez `@implementation`). Agent implementujący nie może ich widzieć.
 4. Uwzględnij labele `@implementation` aksjomatu i dodaj odpowiednie pozycje do listy zmian (np. "napisz testy" dla `[test]`, "napisz test e2e" dla `[e2e]`).
 
 Wypisz listę zmian w formacie:
@@ -270,6 +272,22 @@ Wypisz w formacie:
 ## Scenariusze holdout
 - [ ] Scenariusz X (z aksjomatu Y)
 - [ ] Scenariusz Z (z aksjomatu W)
+```
+
+**C) Kontekst satisfaction (dla Kroku 7):**
+
+Zbierz bloki aksjomatów oznaczone labelami `@satisfaction`. Każdy taki blok to prompt dla AI-sędziego — opis scenariusza do wykonania i oceny na działającej aplikacji. Scenariusze `@satisfaction` NIE generują kodu ani testów.
+
+Dla każdego scenariusza odczytaj:
+1. **Prompt** — treść aksjomatu (opis co sprawdzić, jak ocenić)
+2. **Próg** — wymagany minimalny score (domyślnie 0.7 jeśli nie podany)
+3. **Narzędzia** — jeśli definicja labela określa narzędzia (np. browser automation)
+
+Wypisz w formacie:
+```
+## Scenariusze satisfaction
+- [ ] Scenariusz X (z aksjomatu Y) — próg: 0.8
+- [ ] Scenariusz Z (z aksjomatu W) — próg: 0.7
 ```
 
 Zapisz obie listy do `.axioms/sync-result.md` (data, tryb diff/full, podsumowanie zmian, kontekst implementacyjny, kontekst walidacyjny).
@@ -322,6 +340,42 @@ Dla każdego scenariusza `@validation`-only z Kroku 3B:
 
 Jeśli po zakończeniu sync użytkownik nadal widzi błędy — to sygnał, że specyfikacja jest niekompletna (brakuje aksjomatu lub labela). Ale to już poza zakresem tego sync — wymaga edycji aksjomatów i ponownego uruchomienia.
 
+### Krok 7: Satisfaction review (agent-sędzia)
+
+Wykonaj po zakończeniu Kroków 5–6 (implementacja i walidacja muszą przejść). Ten krok wymaga działającej aplikacji.
+
+Jeśli nie ma labeli `@satisfaction` — pomiń ten krok.
+
+Dla każdego scenariusza `@satisfaction` z Kroku 3C:
+
+1. **Deleguj do osobnego agenta-sędziego.** Agent otrzymuje:
+   - Treść scenariusza (prompt z aksjomatu)
+   - Dostęp do działającej aplikacji (URL, browser automation, itp.)
+   - Narzędzia zdefiniowane w labelu (np. browser automation, screenshot)
+2. **Agent NIE otrzymuje:**
+   - Kodu źródłowego
+   - Procesu myślowego agentów implementującego i walidującego
+   - Treści aksjomatów spoza scenariusza
+3. **Agent wykonuje scenariusz** — wchodzi w interakcję z aplikacją jak użytkownik (klika, nawiguje, sprawdza UI) i ocenia doświadczenie.
+4. **Agent zwraca:**
+   - Score: 0.0–1.0
+   - Uzasadnienie: co działa, co nie, co wymaga poprawy
+   - Opcjonalnie: screenshoty, nagrania
+5. **Porównaj score z progiem.** Jeśli score < próg:
+   - Przekaż uzasadnienie agentowi implementującemu (bez treści scenariusza `@satisfaction` — agent nadal nie widzi promptu sędziego).
+   - Agent implementujący poprawia na podstawie opisu problemu.
+   - Powtórz cykl: implementacja → walidacja → satisfaction review.
+6. **Sync kończy się** dopiero gdy wszystkie scenariusze satisfaction osiągną wymagany próg (lub orkiestrator zgłosi brak postępu po N iteracjach).
+
+Wynik satisfaction review zapisz do `.axioms/sync-result.md`:
+```
+## Satisfaction review
+- Scenariusz X (aksjomat Y): 0.85/1.0 ✓ (próg: 0.7)
+  Uzasadnienie: ...
+- Scenariusz Z (aksjomat W): 0.55/1.0 ✗ (próg: 0.8)
+  Uzasadnienie: ...
+```
+
 ## Partyjne przetwarzanie
 
 Jeśli liczba aksjomatów do przetworzenia jest duża (>20), podziel pracę na partie:
@@ -329,6 +383,7 @@ Jeśli liczba aksjomatów do przetworzenia jest duża (>20), podziel pracę na p
 2. Krok 3 (plan + filtrowanie) — po grupach (per folder/domena).
 3. Krok 5 (implementacja) — deleguj agentowi po jednym aksjomacie na raz.
 4. Krok 6 (weryfikacja) — deleguj agentowi/agentom na całości po zakończeniu implementacji.
+5. Krok 7 (satisfaction) — deleguj agentowi-sędziemu po zakończeniu weryfikacji.
 
 ## Zasady
 

@@ -43,16 +43,18 @@ When the AI misinterprets an axiom, you don't bypass the framework — you move 
 
 This gradient is self-correcting: each iteration makes the specification more precise. Instead of escaping the framework when it produces wrong code, you deepen it — and the next sync gets it right.
 
-**Layered verification.** Axioms can carry labels — `[test]`, `[security]`, `[e2e]`, `[rodo]` — that define what kind of verification each axiom requires. A strict type system (e.g. OCaml) adds another verification layer at compile time. The combination of typed languages, labeled tests, and AI-powered sync creates a multi-layered safety net where each layer catches a different class of errors.
+**Layered verification.** Axioms can carry labels — `[test]`, `[security]`, `[e2e]`, `[ux]`, `[rodo]` — that define what kind of verification each axiom requires. Verification happens across three phases: deterministic tools and tests (`@validation`), AI-powered subjective evaluation (`@satisfaction`), and compile-time type checking. The combination creates a multi-layered safety net where each layer catches a different class of errors — from type mismatches to UX problems that no test can express.
 
 **Labels as verification pipelines.** A label is not just a tag — it is a declarative verification pipeline. The engineer defines *how* each label is verified: which static analysis tools to run, which AI model to use for review, what specific concerns to check for. The label definition is the engineer's primary lever for ensuring code quality. A well-designed label catches what the generating agent misses.
 
-**Label phases.** Each label declares its visibility in the pipeline using phase annotations: `@implementation`, `@validation`, or both. This controls which agent sees axiom blocks carrying that label:
+**Label phases.** Each label declares its visibility in the pipeline using phase annotations: `@implementation`, `@validation`, `@satisfaction`, or a combination. This controls which agent sees axiom blocks carrying that label:
 
 - `@implementation` — visible to the implementing agent (code generation)
-- `@validation` — visible to the validating agent (verification)
-- Both — visible to both (e.g., `[test]` for TDD: tests written during implementation, then verified)
+- `@validation` — visible to the validating agent (deterministic verification)
+- `@satisfaction` — visible to the AI judge agent (subjective evaluation of the running application)
+- Both `@implementation @validation` — visible to both (e.g., `[test]` for TDD: tests written during implementation, then verified)
 - `@validation` only — **holdout**: hidden from the implementing agent entirely. The agent builds software without knowing these validation criteria. This works like a holdout set in machine learning — preventing the agent from optimizing for test passage rather than building correct software.
+- `@satisfaction` only — the scenario does not generate code or tests. It is a prompt for an AI judge that interacts with the running application and evaluates it subjectively (UX, readability, intuitiveness, overall quality). The judge returns a score (0.0–1.0) instead of pass/fail.
 
 Every label must declare at least one phase. A label without a phase annotation is an error caught during consistency checking.
 
@@ -76,7 +78,18 @@ after implementation — the implementing agent never sees these.
 1. Run benchmark suite: `make bench`
 2. Agent review: check for N+1 queries, unbounded loops, missing indexes
 3. Compare results against baseline from previous sync
+
+### [ux] @satisfaction
+Threshold: 0.7
+AI judge opens the application in a browser, performs the described
+scenario, and evaluates usability, readability, and intuitiveness.
+
+### [scenario] @validation @satisfaction
+When an employee accepts an order, the owner sees it in
+their dashboard within 3 seconds.
 ```
+
+The three phases form a complete pipeline: `@implementation` builds the code, `@validation` verifies it deterministically (pass/fail), and `@satisfaction` evaluates the running application subjectively (score 0.0–1.0). A scenario can span multiple phases — for example, `@validation @satisfaction` first runs a deterministic holdout test, then has the AI judge evaluate the same behavior qualitatively.
 
 **Deterministic tools first.** The strongest verification pipelines maximize the use of deterministic tools — linters, type checkers, static analyzers, benchmark suites, OWASP scanners — and use AI agents only for what deterministic tools cannot catch (semantic review, intent matching, architectural judgment). A label that runs `semgrep` + `sqlmap` + an AI review is stronger than one that relies on AI review alone, because deterministic tools have zero hallucination rate. The ideal label pipeline is: deterministic tools catch the known classes of errors, AI agent catches the rest.
 
@@ -183,10 +196,11 @@ Axiom files are loaded by following the link chain from `main.md` — only files
 
 The sync process follows an **orchestrator pattern**. The main process handles planning (snapshot, diff, reading axioms, consistency checks, change list generation, marker verification) and then delegates execution to isolated agents:
 
-- **Implementing agent** — receives axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only labels are stripped from its context. Builds code and writes tests for `@implementation` labels.
+- **Implementing agent** — receives axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only or `@satisfaction`-only labels are stripped from its context. Builds code and writes tests for `@implementation` labels.
 - **Validating agent(s)** — receive axioms filtered to `@validation` labels. For `@validation`-only (holdout) labels, the agent has no access to source code — it evaluates system behavior from the outside.
+- **Satisfaction agent (AI judge)** — receives `@satisfaction` scenarios as prompts. Interacts with the running application (browser automation, API calls) and evaluates it subjectively, returning a score (0.0–1.0) with justification. Has no access to source code or other agents' reasoning.
 
-If validation fails, the implementing agent receives the error description but still never sees holdout blocks — it must fix the issue based on the error alone.
+If validation or satisfaction review fails, the implementing agent receives the error/feedback description but still never sees holdout or satisfaction blocks — it must fix the issue based on the description alone. The cycle repeats until all checks pass.
 
 **Declarative axioms.** Some axioms describe rules, architecture, or exclusions that have no direct representation in code. These axioms don't require `@axiom` markers in generated files.
 

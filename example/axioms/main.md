@@ -26,8 +26,9 @@ Wymogi bezpieczeństwa weryfikowane testem penetracyjnym.
 ### [architecture-check] @validation
 Weryfikacja zgodności z architekturą systemu (dekompozycja, kontrakty serwisów, warstwy).
 
-### [ux-validate] @validation
-Weryfikacja użyteczności interfejsu — czy UI jest zrozumiały dla użytkownika bez instrukcji.
+### [ux-validate] @satisfaction
+Próg: 0.7
+Weryfikacja użyteczności interfejsu — AI-sędzia otwiera aplikację w przeglądarce i ocenia czy UI jest zrozumiały dla użytkownika bez instrukcji.
 
 ## Aksjomaty
 
