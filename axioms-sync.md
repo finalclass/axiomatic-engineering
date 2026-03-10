@@ -29,16 +29,20 @@ Struktura:
 
 ## Słownik
 - **Termin** - definicja pojęcia...
+- **satisfaction-level** - 0.7
 
 ## Labele
-### [test] @implementation @validation
+### [test] @implementation @validation +code
 Opis/instrukcje dla labela test
 
-### [scenario] @validation
+### [scenario] @validation +browser
 Scenariusze behawioralne. Walidowane po implementacji.
 
-### [security] @validation
+### [security] @validation +code +api
 Opis/instrukcje dla labela security
+
+### [ux] @satisfaction(satisfaction-level) +browser
+Weryfikacja użyteczności interfejsu.
 
 ## Aksjomaty
 [lint]
@@ -49,7 +53,8 @@ Opis/instrukcje dla labela security
 Sekcja "## Słownik":
 - Zawiera definicje pojęć domenowych w formacie `**Termin** - opis`
 - Pojęcia ze słownika NIE SĄ aksjomatami — nie generuj dla nich zmian, testów ani implementacji
-- Słownik służy wyłącznie do rozumienia znaczenia terminów używanych w aksjomatach
+- Słownik służy do rozumienia znaczenia terminów używanych w aksjomatach
+- **Wartości słownikowe w labelach:** Jeśli argument `@satisfaction()` nie jest liczbą, traktuj go jako klucz słownikowy. Np. `@satisfaction(satisfaction-level)` → szuka `**satisfaction-level**` w słowniku i używa jego wartości liczbowej. Jeśli klucz nie istnieje w słowniku — błąd spójności (Krok 2).
 
 Sekcja "## Labele":
 - Definicje labeli w formacie `### [nazwa-labela] @fazy...`
@@ -59,7 +64,7 @@ Sekcja "## Labele":
 - **Fazy labela:** Po nazwie labela w headingu podaje się jedną lub więcej faz: `@implementation`, `@validation`, `@satisfaction`. Fazy określają *kiedy* uruchomić agenta dla tego labela:
   - `@implementation` — bloki z tym labelem trafiają do agenta implementującego (Krok 5)
   - `@validation` — bloki trafiają do agenta walidującego (Krok 6)
-  - `@satisfaction(próg)` — bloki trafiają do agenta-sędziego (Krok 7). Agent ocenia doświadczenie w skali 0.0–1.0. Próg to minimalny wymagany score, np. `@satisfaction(0.8)`. Domyślnie `@satisfaction` = `@satisfaction(0.7)`.
+  - `@satisfaction(próg)` — bloki trafiają do agenta-sędziego (Krok 7). Agent ocenia doświadczenie w skali 0.0–1.0. Próg to minimalny wymagany score — może być liczbą (`@satisfaction(0.8)`) lub kluczem ze słownika (`@satisfaction(satisfaction-level)`). Domyślnie `@satisfaction` = `@satisfaction(0.7)`.
   - Label z oboma fazami (`@implementation @validation`) — widoczny dla obu agentów (np. `[test]` — TDD w implementacji + weryfikacja)
   - Label tylko z `@validation` — ukryty przed agentem implementującym (holdout). Agent buduje software bez wiedzy o tych kryteriach walidacyjnych. Działa jak holdout set w ML.
   - Label tylko z `@satisfaction` — scenariusz nie generuje kodu ani testów. Jest promptem dla AI-sędziego, który wchodzi w interakcję z działającą aplikacją i ocenia ją subiektywnie. To jest walidacja tego, czego nie da się sprawdzić deterministycznym testem: UX, czytelność, intuicyjność, ogólna jakość.

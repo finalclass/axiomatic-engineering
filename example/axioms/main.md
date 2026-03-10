@@ -8,6 +8,7 @@ System do zarządzania gabinetem medycznym online — rejestracja wizyt, panel p
 - **Terapeuta** — specjalista prowadzący wizyty, zarządza swoim kalendarzem
 - **Wizyta** — zarezerwowany termin spotkania pacjenta z terapeutą
 - **Grafik** — tygodniowy harmonogram dostępności terapeuty
+- **satisfaction-level** — 0.7
 
 ## Labele
 
@@ -26,7 +27,7 @@ Wymogi bezpieczeństwa weryfikowane testem penetracyjnym.
 ### [architecture-check] @validation +code +axioms
 Weryfikacja zgodności z architekturą systemu (dekompozycja, kontrakty serwisów, warstwy).
 
-### [ux-validate] @satisfaction(0.7) +browser
+### [ux-validate] @satisfaction(satisfaction-level) +browser
 Weryfikacja użyteczności interfejsu — AI-sędzia otwiera aplikację w przeglądarce i ocenia czy UI jest zrozumiały dla użytkownika bez instrukcji.
 
 ## Aksjomaty

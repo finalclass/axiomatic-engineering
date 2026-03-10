@@ -51,7 +51,7 @@ This gradient is self-correcting: each iteration makes the specification more pr
 
 - `@implementation` — visible to the implementing agent (code generation)
 - `@validation` — visible to the validating agent (deterministic verification)
-- `@satisfaction(threshold)` — visible to the AI judge agent (subjective evaluation of the running application). The threshold is the minimum required score (0.0–1.0), defaulting to 0.7 if omitted: `@satisfaction` = `@satisfaction(0.7)`.
+- `@satisfaction(threshold)` — visible to the AI judge agent (subjective evaluation of the running application). The threshold is the minimum required score (0.0–1.0), defaulting to 0.7 if omitted: `@satisfaction` = `@satisfaction(0.7)`. The threshold can be a number or a **glossary key** — e.g., `@satisfaction(satisfaction-level)` looks up `**satisfaction-level**` in the glossary. This lets you define the threshold once and reference it across labels.
 - Both `@implementation @validation` — visible to both (e.g., `[test]` for TDD: tests written during implementation, then verified)
 - `@validation` only — **holdout**: hidden from the implementing agent entirely. The agent builds software without knowing these validation criteria. This works like a holdout set in machine learning — preventing the agent from optimizing for test passage rather than building correct software.
 - `@satisfaction` only — the scenario does not generate code or tests. It is a prompt for an AI judge that interacts with the running application and evaluates it subjectively (UX, readability, intuitiveness, overall quality). The judge returns a score (0.0–1.0) instead of pass/fail.
@@ -92,11 +92,11 @@ after implementation — the implementing agent never sees these.
 Architecture review. Checks decomposition, service contracts,
 and layer boundaries against the system's architectural rules.
 
-### [ux] @satisfaction(0.7) +browser
+### [ux] @satisfaction(satisfaction-level) +browser
 AI judge opens the application in a browser, performs the described
 scenario, and evaluates usability, readability, and intuitiveness.
 
-### [scenario] @validation @satisfaction(0.8) +browser
+### [scenario] @validation @satisfaction(satisfaction-level) +browser
 When an employee accepts an order, the owner sees it in
 their dashboard within 3 seconds.
 ```
@@ -173,7 +173,7 @@ In this example: the entire file has `[rodo]`. The "Technical security" section 
 
 **Modular namespacing.** Axioms live in the `axioms/` directory, organized by domain. Each file is a namespace. An axiom's full identifier is its file path (relative to `axioms/`) plus optional anchor: `patient-client/booking.md` or `data-protection.md#technical-security`. This is the same format as a standard Markdown link — one convention, zero translation between references, code markers, and links.
 
-**Glossary** (`## Słownik` / `## Glossary`) contains domain term definitions. Glossary entries are NOT axioms — they don't generate code or tests. They exist to ensure shared understanding of domain language between stakeholders and AI.
+**Glossary** (`## Słownik` / `## Glossary`) contains domain term definitions. Glossary entries are NOT axioms — they don't generate code or tests. They exist to ensure shared understanding of domain language between stakeholders and AI. Glossary entries can also hold **configuration values** referenced by labels — e.g., `**satisfaction-level** — 0.7` can be referenced as `@satisfaction(satisfaction-level)`. One place to change when moving from mockup to production thresholds.
 
 ## @axiom markers
 
