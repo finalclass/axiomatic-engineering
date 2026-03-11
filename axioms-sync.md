@@ -215,7 +215,6 @@ Execute the following steps SEQUENTIALLY. Do not proceed to the next step withou
    - Subsequent steps (change list, implementation) apply ONLY to changed axioms.
 6. **If mode = full** (`--full`):
    - Ignore `.axioms/freeze/`, process all axioms.
-7. Save snapshot to freeze: Copy contents of `.axioms/current/` to `.axioms/freeze/` (overwrite).
 
 ### Step 1: Load axioms
 
@@ -385,6 +384,14 @@ Save the satisfaction review result to `.axioms/sync-result.md`:
 - Scenario Z (axiom W): 0.55/1.0 ✗ (threshold: 0.8)
   Justification: ...
 ```
+
+### Step 8: Save freeze
+
+After all previous steps complete successfully (implementation, validation, and satisfaction review all pass):
+
+1. Copy contents of `.axioms/current/` to `.axioms/freeze/` (overwrite).
+
+This ensures that if sync fails mid-way (e.g., during implementation or validation), the next run will detect the same changes and retry them. Freeze is only updated after a fully successful sync.
 
 ## Batch processing
 
