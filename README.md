@@ -30,7 +30,7 @@ If you think AI is a better autocomplete for writing loops, this framework is no
 
 ## Design principles
 
-**Specification is the product.** Code is derived. If your axioms are precise and complete, the generated code is correct. If the code has a bug, the axiom is incomplete — you fix the axiom, not the code.
+**Specification is the product.** Code is derived. If your axioms are precise and complete, the generated code is correct. If the code has a bug, the axiom is incomplete — you fix the axiom, not the code. This applies to every kind of change without exception: new features, bug fixes, UI adjustments, refactors, dependency updates. The workflow is always: edit the axiom first, then sync. Never touch code directly.
 
 **Progressive refinement.** You never leave the framework to fix code — you refine the axiom. Axioms exist on a natural gradient of specificity:
 

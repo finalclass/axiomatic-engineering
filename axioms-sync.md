@@ -404,7 +404,8 @@ If the number of axioms to process is large (>20), split the work into batches:
 
 ## Rules
 
-- Do not modify axioms. Axioms are the source of truth.
+- **Never change code directly.** Every change to the system — whether it's a bug fix, new feature, UI tweak, or refactor — starts with editing the axioms. Code is a derived artifact; modifying it directly bypasses the source of truth and breaks traceability. If a user requests a change, the first step is always to update the relevant axiom in `axioms/`, then run sync to propagate the change to code.
+- Do not modify axioms during sync. Axioms are the source of truth — the sync process reads them but never alters them.
 - If an axiom is unrealizable — report it, do not implement a workaround.
 - If an axiom is tagged `[test]` — code WITHOUT a test does not comply with the axiom.
 - Prefer small, atomic commits: one axiom = one commit.
