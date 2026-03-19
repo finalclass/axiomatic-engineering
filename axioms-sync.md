@@ -72,7 +72,7 @@ Interface usability verification.
 - **Context markers (`+`):** After phases, context markers can be specified to determine *what* the agent receives. Every agent always receives its own axiom (the one the label originates from). Available markers:
   - `+code` — access to source code in `code/`
   - `+axioms` — access to all system axioms (not just its own)
-  - `+browser` — access to a browser / running application (browser automation)
+  - `+browser` — access to a browser / running application via `agent-browser` CLI (see "Browser automation" section below)
   - `+api` — access to HTTP endpoints (curl, requests)
   - No markers = agent receives only its axiom and label instructions
 - **Agent isolation:** Each label in the verification and satisfaction phases launches a **separate agent** with context determined by `+` markers. The main process (Steps 0–4) serves as the orchestrator — reads axioms, builds the plan, filters context, and delegates work. The implementing agent does NOT see blocks from `@validation`-only or `@satisfaction`-only labels. The validating agent does NOT see the implementing agent's reasoning. The `+` markers control what each agent sees — e.g., a `[ux-validate]` agent with `+browser` but without `+code` cannot cheat by inspecting HTML instead of evaluating the UI.
@@ -185,6 +185,69 @@ PHP:
 ### Declarative axioms (no markers in code)
 
 Some axioms describe rules, architecture, or exclusions — they have no direct representation in code and do NOT require `@axiom` markers. Such axioms should be listed in the project's axiom file.
+
+## Browser automation (`+browser`)
+
+Agents with the `+browser` marker use `agent-browser` CLI (Vercel Labs) to interact with the running application. `agent-browser` is a Rust-powered CLI designed for AI agents — it uses semantic locators instead of DOM trees, keeping context usage minimal.
+
+### Usage
+
+The agent invokes `agent-browser` commands via Bash. The browser persists between calls (daemon mode) — chain commands with `&&` or run them separately.
+
+Key commands:
+
+```bash
+# Navigate to a URL
+agent-browser open "https://app.example.com"
+
+# Get accessibility tree with element refs (primary way to "see" the page)
+agent-browser snapshot -i           # interactive elements only
+agent-browser snapshot -i -c        # compact (no empty nodes)
+
+# Click, fill, type by @ref from snapshot
+agent-browser click @e2
+agent-browser fill @e3 "user@example.com"
+agent-browser type @e4 "search query"
+
+# Find elements by role/text/label and act on them
+agent-browser find role button click --name "Submit"
+agent-browser find text "Log in" click
+
+# Read content
+agent-browser get text              # full page text
+agent-browser get text @e1          # text of specific element
+
+# Screenshot (for visual evaluation)
+agent-browser screenshot /tmp/page.png
+agent-browser screenshot --annotate  # labeled screenshot for vision models
+
+# Wait for page load
+agent-browser wait --load networkidle
+
+# Press keys, scroll
+agent-browser press Enter
+agent-browser scroll down 500
+```
+
+### Agent instructions for `+browser`
+
+When delegating to an agent with `+browser`, include the following in the agent's prompt:
+
+```
+You have access to a running application via `agent-browser` CLI.
+Use Bash to run `agent-browser` commands to interact with the application.
+
+Workflow:
+1. agent-browser open "URL"
+2. agent-browser snapshot -i -c   (get interactive elements with @refs)
+3. Use @refs to click, fill, type: agent-browser click @e2
+4. agent-browser screenshot /tmp/evidence.png  (capture evidence)
+
+Key commands: open, snapshot, click, fill, type, find, get text, screenshot, press, scroll, wait.
+Chain commands: agent-browser open URL && agent-browser wait --load networkidle && agent-browser snapshot -i
+```
+
+The application URL comes from the project's `production_url` (or testing URL if deployed to testing).
 
 ## Run modes
 
@@ -365,7 +428,7 @@ For each `@satisfaction` scenario from Step 3C:
    - Source code (no `+code`)
    - Reasoning from the implementing and validating agents
    - Axiom content beyond the scenario (no `+axioms`)
-3. **The agent executes the scenario** — interacts with the application like a user (clicks, navigates, checks UI) and evaluates the experience.
+3. **The agent executes the scenario** — uses `agent-browser` CLI to interact with the application like a user (clicks, navigates, checks UI) and evaluates the experience.
 4. **The agent returns:**
    - Score: 0.0–1.0
    - Justification: what works, what doesn't, what needs improvement
