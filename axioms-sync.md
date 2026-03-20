@@ -188,64 +188,9 @@ Some axioms describe rules, architecture, or exclusions — they have no direct 
 
 ## Browser automation (`+browser`)
 
-Agents with the `+browser` marker use `agent-browser` CLI (Vercel Labs) to interact with the running application. `agent-browser` is a Rust-powered CLI designed for AI agents — it uses semantic locators instead of DOM trees, keeping context usage minimal.
+Agents with the `+browser` marker use `agent-browser` CLI (Vercel Labs) to interact with the running application. The `agent-browser` skill must be installed globally (`npx skills add vercel-labs/agent-browser -y -g`).
 
-### Usage
-
-The agent invokes `agent-browser` commands via Bash. The browser persists between calls (daemon mode) — chain commands with `&&` or run them separately.
-
-Key commands:
-
-```bash
-# Navigate to a URL
-agent-browser open "https://app.example.com"
-
-# Get accessibility tree with element refs (primary way to "see" the page)
-agent-browser snapshot -i           # interactive elements only
-agent-browser snapshot -i -c        # compact (no empty nodes)
-
-# Click, fill, type by @ref from snapshot
-agent-browser click @e2
-agent-browser fill @e3 "user@example.com"
-agent-browser type @e4 "search query"
-
-# Find elements by role/text/label and act on them
-agent-browser find role button click --name "Submit"
-agent-browser find text "Log in" click
-
-# Read content
-agent-browser get text              # full page text
-agent-browser get text @e1          # text of specific element
-
-# Screenshot (for visual evaluation)
-agent-browser screenshot /tmp/page.png
-agent-browser screenshot --annotate  # labeled screenshot for vision models
-
-# Wait for page load
-agent-browser wait --load networkidle
-
-# Press keys, scroll
-agent-browser press Enter
-agent-browser scroll down 500
-```
-
-### Agent instructions for `+browser`
-
-When delegating to an agent with `+browser`, include the following in the agent's prompt:
-
-```
-You have access to a running application via `agent-browser` CLI.
-Use Bash to run `agent-browser` commands to interact with the application.
-
-Workflow:
-1. agent-browser open "URL"
-2. agent-browser snapshot -i -c   (get interactive elements with @refs)
-3. Use @refs to click, fill, type: agent-browser click @e2
-4. agent-browser screenshot /tmp/evidence.png  (capture evidence)
-
-Key commands: open, snapshot, click, fill, type, find, get text, screenshot, press, scroll, wait.
-Chain commands: agent-browser open URL && agent-browser wait --load networkidle && agent-browser snapshot -i
-```
+When delegating to an agent with `+browser`, the agent must have the `agent-browser` skill loaded. The skill provides full documentation of the CLI workflow: open → snapshot → interact via @refs → screenshot.
 
 The application URL comes from the project's `production_url` (or testing URL if deployed to testing).
 
