@@ -38,11 +38,18 @@ Description/instructions for the test label
 ### [scenario] @validation +browser
 Behavioral scenarios. Validated after implementation.
 
+### [e2e] @implementation @validation +browser
+End-to-end tests using Playwright. Install via bun.
+Validated by running the app and executing Playwright tests.
+
 ### [security] @validation +code +api
 Description/instructions for the security label
 
 ### [ux] @satisfaction(satisfaction-level) +browser
 Interface usability verification.
+
+### [ui] @satisfaction(satisfaction-level) +browser
+Visual quality and design consistency review.
 
 ## Axioms
 [lint]
@@ -98,6 +105,7 @@ Syntax:
 - Heading `#` is the axiom name
 - Heading `##` defines sections within the axiom
 - Labels in square brackets on the line below the heading: `[test] [security]`
+- **Threshold override:** A `@satisfaction` label can be used with a local threshold: `[ux(0.9)]`. This overrides the default threshold from the label definition for this specific block. If no override is given (`[ux]`), the threshold from the label definition applies.
 - Descriptive content below (narrative, not checklist)
 - Reference to another axiom: `[Name](./file.md)` or `[Section](./file.md#section)` (standard markdown link)
 - Axiom namespace ID: `{folder}/{file}.md` (e.g., `patient-client/booking.md`). For sections: `{folder}/{file}.md#{heading-slug}` (e.g., `data-protection.md#technical-security`)
@@ -298,7 +306,7 @@ Collect axiom blocks tagged with `@satisfaction` labels. Each such block is a pr
 
 For each scenario, read:
 1. **Prompt** — axiom content (description of what to check, how to evaluate)
-2. **Threshold** — from `@satisfaction(threshold)` in the label definition (default 0.7)
+2. **Threshold** — if the label usage has a local override (e.g., `[ux(0.9)]`), use that value. Otherwise, use the threshold from `@satisfaction(threshold)` in the label definition. If neither is specified, default is 0.7.
 3. **Context** — `+` markers from the label definition (e.g., `+browser` = browser automation)
 
 Output in the format:
@@ -400,6 +408,17 @@ After all previous steps complete successfully (implementation, validation, and 
 1. Copy contents of `.axioms/current/` to `.axioms/freeze/` (overwrite).
 
 This ensures that if sync fails mid-way (e.g., during implementation or validation), the next run will detect the same changes and retry them. Freeze is only updated after a fully successful sync.
+
+## Parallelism
+
+Steps 5 → 6 → 7 run sequentially (pipeline): implementation must finish before validation, validation before satisfaction review.
+
+Within each step, independent agents SHOULD run in parallel:
+- **Step 6 (validation):** Agents for different labels (e.g., `[test]`, `[e2e]`, `[security]`) have no shared state — launch them concurrently.
+- **Step 7 (satisfaction):** Judge agents for different scenarios (`[scenario]`, `[ux]`, `[ui]`) are fully independent — launch them concurrently.
+- **Step 5 (implementation):** Axioms MAY be implemented in parallel if they don't touch the same files. When in doubt, run sequentially.
+
+In the fix cycle (Step 6C), only re-run the failing agents — not the entire step.
 
 ## Batch processing
 
