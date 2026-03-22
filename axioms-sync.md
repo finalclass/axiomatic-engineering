@@ -202,6 +202,8 @@ When delegating to an agent with `+browser`, the agent must have the `agent-brow
 
 The application URL comes from the project's `production_url` (or testing URL if deployed to testing).
 
+All browser interactions during sync — in every step and every agent (orchestrator, implementing, validating, judge) — go through `agent-browser`. Direct browser tools (e.g., Claude in Chrome, DevTools MCP) MUST NOT be used. If a browser-based check fails, the fix path is: rebuild assets → restart server → re-run the agent — not manual debugging in the browser.
+
 ## Run modes
 
 ### Default mode (diff)
