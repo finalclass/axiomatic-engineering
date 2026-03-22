@@ -228,6 +228,18 @@ A well-decomposed system gives the AI agent small, closed problems with minimal 
 
 The practical rule: decompose for AI comprehensibility. Small services with clear contracts and atomic business verbs (not CRUDs) at the boundaries. For volatility-based decomposition, [idesign-architect](https://github.com/finalclass/idesign-architect) works well with this approach.
 
+## Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — the sync orchestrator runs as a Claude Code skill
+- [agent-browser](https://github.com/vercel-labs/agent-browser) — required for `+browser` labels. Install the CLI globally:
+  ```bash
+  npm install -g agent-browser
+  ```
+- **agent-browser skill for Claude Code** — so that agents know how to use the CLI:
+  ```bash
+  npx skills add vercel-labs/agent-browser -y -g
+  ```
+
 ## Example
 
 See the [example/](./example/) directory for a simplified project demonstrating the axiom format, label cascade, namespacing, and generated code with @axiom markers.
