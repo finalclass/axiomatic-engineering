@@ -1,3 +1,5 @@
 .axioms/
 code/
 data/
+node_modules/
+bun.lock
