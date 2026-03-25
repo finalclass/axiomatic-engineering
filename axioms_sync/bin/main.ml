@@ -72,8 +72,52 @@ let prompt_of_task (task : Types.task) : string =
       Rate satisfaction from 0.0 to 1.0 (threshold: %.1f). \
       Return your rating as a number on the last line." task.axiom_id task.label.name threshold
 
-(** Run a single task — executor is resolved from model alias by ai_access *)
-let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?provider (task : Types.task) : (string, string) result =
+(** Run the planner model to create an implementation plan for a task *)
+let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?provider (task : Types.task) : string option =
+  let planner_alias = config.planner in
+  let model_id = match Ai_access.resolve_alias planner_alias with
+    | Some (_, id) -> id
+    | None -> failwith (Printf.sprintf "Unknown planner model alias: %s" planner_alias)
+  in
+  let executor = Ai_access.executor_for_alias planner_alias in
+  let system = Printf.sprintf
+    "You are a planning agent. Your job is to analyze the axiom specification and \
+     create a detailed implementation plan. Do NOT implement anything — only plan.\n\n\
+     Axiom specification:\n\n%s\n\n\
+     Label: %s — %s\n\n\
+     Code directory: %s\n\n\
+     Output a step-by-step plan describing:\n\
+     - What files to create or modify\n\
+     - What each file should contain\n\
+     - How to use @axiom markers for traceability\n\
+     - Any dependencies between steps"
+    task.context task.label.name task.label.description code_dir
+  in
+  let prompt = Printf.sprintf
+    "Create an implementation plan for axiom '%s', label [%s]."
+    task.axiom_id task.label.name
+  in
+  (* Planner gets read-only tools — can inspect code but not modify *)
+  let tools = Tools.tool_defs_for_markers [Types.Code] in
+  let read_only_tools = List.filter (fun (td : Ai_access.tool_def) ->
+    td.name = "read_file" || td.name = "list_files"
+  ) tools in
+  Printf.printf "  planning [%s] %s (%s) ... %!" task.label.name task.axiom_id planner_alias;
+  match Ai_access.dispatch
+    ~executor ~model:model_id ~system ~prompt ~cwd:code_dir ~quiet
+    ?provider ~tools:read_only_tools ~execute_tool:(Tools.execute ~base_dir:code_dir)
+    ~max_iterations:10 ()
+  with
+  | Ok plan ->
+    Printf.printf "done\n%!";
+    Some plan
+  | Error msg ->
+    Printf.printf "FAILED: %s\n%!" msg;
+    None
+
+(** Run a single task — executor is resolved from model alias by ai_access.
+    If plan is provided, it's injected into the implementation prompt. *)
+let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?provider ?plan (task : Types.task) : (string, string) result =
   let model_alias = Types.model_alias_of_class config task.model_class in
   let model_id = match Ai_access.resolve_alias model_alias with
     | Some (_, id) -> id
@@ -81,7 +125,11 @@ let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?prov
   in
   let executor = Ai_access.executor_for_alias model_alias in
   let system = system_prompt_of_task ~code_dir task in
-  let prompt = prompt_of_task task in
+  let prompt = match plan with
+    | Some p ->
+      Printf.sprintf "%s\n\nFollow this implementation plan:\n\n%s" (prompt_of_task task) p
+    | None -> prompt_of_task task
+  in
   let tools = Tools.tool_defs_for_markers task.label.markers in
   Ai_access.dispatch
     ~executor ~model:model_id ~system ~prompt ~cwd:code_dir ~quiet
@@ -148,9 +196,11 @@ let wire_http_client net =
     parse_http_response (Buffer.contents buf)
   )
 
-(** Check if any model alias uses Http executor *)
+(** Check if any model alias uses Http executor (including planner) *)
 let needs_http (config : Types.config) (tasks : Types.task list) : bool =
-  List.exists (fun (task : Types.task) ->
+  let planner_http = match Ai_access.executor_for_alias config.planner with
+    | Ai_access.Http -> true | Ai_access.Cli _ -> false in
+  planner_http || List.exists (fun (task : Types.task) ->
     let alias = Types.model_alias_of_class config task.model_class in
     match Ai_access.executor_for_alias alias with
     | Ai_access.Http -> true
@@ -261,11 +311,20 @@ let () =
   in
 
   if impl_tasks <> [] then begin
+    (* Step 5a: Planning *)
+    section "Planning";
+    let plans = List.map (fun task ->
+      (task, run_planner ~config ~code_dir ~quiet ?provider:!provider task)
+    ) impl_tasks in
+
+    (* Step 5b: Implementation with plans *)
     section "Implementation";
-    List.iter (fun task ->
-      let (_text, ok) = run task in
-      if ok then Printf.printf "done\n%!"
-    ) impl_tasks
+    List.iter (fun (task, plan) ->
+      Printf.printf "  [%s] %s ... %!" task.Types.label.name task.axiom_id;
+      match run_task ~config ~code_dir ~quiet ?provider:!provider ?plan task with
+      | Ok _text -> Printf.printf "done\n%!"
+      | Error msg -> Printf.printf "FAILED: %s\n%!" msg
+    ) plans
   end;
 
   if valid_tasks <> [] then begin
