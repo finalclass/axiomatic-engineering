@@ -1,0 +1,13 @@
+_build/
+_release/
+*.tar.gz
+*.install
+.merlin
+_opam/
+_esy/
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+node_modules/
+_docs/
+.claude/

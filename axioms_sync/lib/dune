@@ -1,0 +1,5 @@
+(include_subdirs qualified)
+
+(library
+ (name axioms_sync)
+ (libraries well.core eio yojson))

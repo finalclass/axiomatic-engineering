@@ -1,0 +1,28 @@
+(version dev)
+
+(build
+ (all_platforms ((dune))))
+
+(depends
+ (all_platforms
+  (ocaml
+   mlx
+   eio
+   eio_main
+   yojson
+   sqlite3
+   tls-eio
+   mirage-crypto-pk
+   digestif
+   base64
+   zarith
+   ppxlib
+   otoml
+   camlzip)))
+
+(source
+ (fetch
+  (url
+   git+ssh://git@github.com/finalclass/well.git#221918cbfef01c054da9c7b98ceaa778f7a6fec8)))
+
+(dev)
