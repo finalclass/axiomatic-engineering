@@ -1035,6 +1035,137 @@ let () =
       expect c.balanced |> to_equal_string "sonnet4.6";
       expect c.fast |> to_equal_string "haiku4.5"
     );
+
+    (* F-exec1: executor_for_alias routes anthropic models to Cli *)
+    it "executor_for_alias routes opus4.6 to Cli claude" (fun () ->
+      let exec = Ai_access.executor_for_alias "opus4.6" in
+      expect (exec = Ai_access.Cli "claude") |> to_be_true
+    );
+
+    it "executor_for_alias routes sonnet4.6 to Cli claude" (fun () ->
+      let exec = Ai_access.executor_for_alias "sonnet4.6" in
+      expect (exec = Ai_access.Cli "claude") |> to_be_true
+    );
+
+    it "executor_for_alias routes haiku4.5 to Cli claude" (fun () ->
+      let exec = Ai_access.executor_for_alias "haiku4.5" in
+      expect (exec = Ai_access.Cli "claude") |> to_be_true
+    );
+
+    it "executor_for_alias routes unknown model to Http" (fun () ->
+      let exec = Ai_access.executor_for_alias "glm5" in
+      expect (exec = Ai_access.Http) |> to_be_true
+    );
+
+    (* F-stream1: format_stream_event parses system init *)
+    it "format_stream_event parses system init event" (fun () ->
+      let json = Yojson.Safe.from_string
+        {|{"type":"system","session_id":"abc-123","model":"claude-haiku-4-5-20251001"}|} in
+      let (display, result) = Ai_access.format_stream_event json in
+      (match display with
+       | Some s ->
+         expect s |> to_contain "abc-123";
+         expect s |> to_contain "claude-haiku"
+       | None -> failwith "expected display text");
+      expect (result = None) |> to_be_true
+    );
+
+    (* F-stream2: format_stream_event parses assistant text *)
+    it "format_stream_event parses assistant text content" (fun () ->
+      let json = Yojson.Safe.from_string
+        {|{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}|} in
+      let (display, result) = Ai_access.format_stream_event json in
+      (match display with
+       | Some s -> expect s |> to_contain "hello world"
+       | None -> failwith "expected display text");
+      expect (result = None) |> to_be_true
+    );
+
+    (* F-stream3: format_stream_event parses assistant tool_use *)
+    it "format_stream_event parses assistant tool_use" (fun () ->
+      let json = Yojson.Safe.from_string
+        {|{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","id":"tu_1","input":{}}]}}|} in
+      let (display, _) = Ai_access.format_stream_event json in
+      (match display with
+       | Some s -> expect s |> to_contain "Edit"
+       | None -> failwith "expected display text")
+    );
+
+    (* F-stream4: format_stream_event parses result with cost and duration *)
+    it "format_stream_event parses result event" (fun () ->
+      let json = Yojson.Safe.from_string
+        {|{"type":"result","result":"final output","total_cost_usd":0.0123,"duration_ms":1500}|} in
+      let (display, result) = Ai_access.format_stream_event json in
+      (match display with
+       | Some s ->
+         expect s |> to_contain "1500ms";
+         expect s |> to_contain "$0.0123"
+       | None -> failwith "expected display text");
+      (match result with
+       | Some r -> expect r |> to_equal_string "final output"
+       | None -> failwith "expected result text")
+    );
+
+    (* F-stream5: format_stream_event returns None for unknown type *)
+    it "format_stream_event returns None for unknown event type" (fun () ->
+      let json = Yojson.Safe.from_string {|{"type":"rate_limit_event"}|} in
+      let (display, result) = Ai_access.format_stream_event json in
+      expect (display = None) |> to_be_true;
+      expect (result = None) |> to_be_true
+    );
+
+    (* F-cli1: run_cli with echo mock — verifies the shell-out flow *)
+    it "run_cli with echo mock returns output" (fun () ->
+      let result = Ai_access.dispatch
+        ~executor:(Cli "echo")
+        ~model:"test-model"
+        ~system:"sys prompt"
+        ~prompt:"user prompt"
+        ~cwd:"/tmp"
+        ~quiet:true
+        ()
+      in
+      (* echo -p "$(cat promptfile)" --system-prompt "$(cat sysfile)" --model test-model ...
+         will print all args as text — we just check it doesn't crash and returns Ok *)
+      (match result with
+       | Ok output ->
+         expect (String.length output > 0) |> to_be_true
+       | Error msg -> failwith ("expected Ok, got Error: " ^ msg))
+    );
+
+    (* F-cli2: dispatch Http without provider returns Error *)
+    it "dispatch Http without provider returns Error" (fun () ->
+      let result = Ai_access.dispatch
+        ~executor:Http
+        ~model:"test"
+        ~system:"sys"
+        ~prompt:"prompt"
+        ~cwd:"/tmp"
+        ()
+      in
+      (match result with
+       | Ok _ -> failwith "expected Error"
+       | Error msg -> expect msg |> to_contain "provider")
+    );
+
+    (* F-cli3: dispatch Http with mock provider works *)
+    it "dispatch Http with mock provider runs agent loop" (fun () ->
+      let provider : Ai_access.provider = {
+        name = "mock";
+        send = (fun ~model:_ ~system:_ ~messages:_ ~tools:_ ~max_tokens:_ ->
+          { Ai_access.content = [Text "http result"]; stop_reason = "end_turn" });
+      } in
+      let result = Ai_access.dispatch
+        ~executor:Http
+        ~model:"test"
+        ~system:"sys"
+        ~prompt:"prompt"
+        ~cwd:"/tmp"
+        ~provider
+        ()
+      in
+      expect (result = Ok "http result") |> to_be_true
+    );
   )
 
 (* ============================================================ *)
