@@ -196,9 +196,23 @@ Rules:
 
 ## How sync works
 
-The sync process (`/axioms-sync`) is the compiler of axiomatic engineering. It reads axioms, compares them against the last known state (freeze), generates a change list, implements changes, and verifies the result.
+`axioms-sync` is the compiler of axiomatic engineering — a standalone CLI tool written in OCaml. It reads axioms, compares them against the last known state (freeze), generates a change list, implements changes, and verifies the result.
 
-Workflow: edit axioms → run sync → code updates.
+Workflow: edit axioms → run `axioms-sync` → code updates.
+
+```bash
+axioms-sync [PATH] [OPTIONS]
+
+  PATH                  Project directory (default: current directory)
+  --full                Full sync (reprocess all axioms, not just changed)
+  -q, --quiet           Suppress agent streaming output
+  --implementer MODEL   Model alias for implementation
+  --planner MODEL       Model alias for planning
+  --smart MODEL         Model alias for smart class
+  --balanced MODEL      Model alias for balanced class
+  --fast MODEL          Model alias for fast class
+  --preprompt TEXT      Extra system prompt prepended to every AI call
+```
 
 The sync operates in two modes:
 - **Diff mode** (default): only axioms changed since last sync are processed. The sync maintains a freeze snapshot (`.axioms/freeze/`) to detect what changed since the last run.
@@ -206,19 +220,18 @@ The sync operates in two modes:
 
 Axiom files are loaded by following the link chain from `main.md` — only files reachable through links are included in the sync.
 
-The sync process follows an **orchestrator pattern**. The main process handles planning (snapshot, diff, reading axioms, consistency checks, change list generation, marker verification) and then delegates execution to isolated agents:
+The sync process follows an **orchestrator pattern**. The OCaml binary handles all deterministic work (loading, parsing, snapshot, diff, consistency checks, change list generation, marker verification) and then delegates AI work to isolated agents via the Anthropic API:
 
-- **Implementing agent** — receives axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only or `@satisfaction`-only labels are stripped from its context. Builds code and writes tests for `@implementation` labels.
-- **Validating agent(s)** — one per label, each receiving only the resources declared by its `+` markers. An agent with `+code` reviews source code; one with `+browser` tests the running application; one without either evaluates behavior from the outside.
-- **Satisfaction agent (AI judge)** — receives `@satisfaction` scenarios as prompts and resources per `+` markers. Evaluates the application subjectively, returning a score (0.0–1.0) with justification. Score must meet the threshold from `@satisfaction(threshold)` or the cycle repeats.
+1. **Planning** — a planner model analyzes axioms and creates implementation plans (read-only access to code)
+2. **Implementation** — implementing agent writes code following the plan, receiving axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only or `@satisfaction`-only labels are stripped from its context.
+3. **Validation** — one agent per label, each receiving only the resources declared by its `+` markers. An agent with `+code` reviews source code; one with `+browser` tests the running application; one without either evaluates behavior from the outside.
+4. **Satisfaction** — AI judge receives `@satisfaction` scenarios as prompts and resources per `+` markers. Evaluates the application subjectively, returning a score (0.0–1.0) with justification. Score must meet the threshold from `@satisfaction(threshold)` or the cycle repeats.
 
 If validation or satisfaction review fails, the implementing agent receives the error/feedback description but still never sees holdout or satisfaction blocks — it must fix the issue based on the description alone. The cycle repeats until all checks pass.
 
 **Declarative axioms.** Some axioms describe rules, architecture, or exclusions that have no direct representation in code. These axioms don't require `@axiom` markers in generated files.
 
 **Batch processing.** When the number of axioms to process is large (>20), the sync splits work into batches — consistency checking runs on the full set, but implementation proceeds one axiom at a time.
-
-For the complete sync procedure, see [axioms-sync.md](./axioms-sync.md).
 
 ## Architecture and AI
 
@@ -228,16 +241,44 @@ A well-decomposed system gives the AI agent small, closed problems with minimal 
 
 The practical rule: decompose for AI comprehensibility. Small services with clear contracts and atomic business verbs (not CRUDs) at the boundaries. For volatility-based decomposition, [idesign-architect](https://github.com/finalclass/idesign-architect) works well with this approach.
 
+## Installing axioms-sync
+
+The orchestrator is an OCaml 5.4+ binary built with dune.
+
+```bash
+git clone https://github.com/anthropics/axiomatic-engineering.git
+cd axiomatic-engineering
+make install          # builds and copies binary to ~/.local/bin/axioms-sync
+```
+
+Make sure `~/.local/bin` is in your `PATH`. To install elsewhere:
+
+```bash
+make install PREFIX=/usr/local
+```
+
+To uninstall:
+
+```bash
+make uninstall
+```
+
+### Building from source
+
+```bash
+make build        # build the binary
+make test         # run tests
+make check        # type-check only (faster)
+```
+
+Dependencies are managed via `dune pkg lock` — no npm/node required.
+
 ## Prerequisites
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — the sync orchestrator runs as a Claude Code skill
+- **Anthropic API key** — `axioms-sync` calls the Anthropic API directly (configured in `~/.config/archea/archea.toml`)
 - [agent-browser](https://github.com/vercel-labs/agent-browser) — required for `+browser` labels. Install the CLI globally:
   ```bash
   npm install -g agent-browser
-  ```
-- **agent-browser skill for Claude Code** — so that agents know how to use the CLI:
-  ```bash
-  npx skills add vercel-labs/agent-browser -y -g
   ```
 
 ## Example

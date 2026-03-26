@@ -24,12 +24,12 @@ let parse_context_marker (s : string) : context_marker option =
   | "+axioms" -> Some Axioms
   | _ -> None
 
-(** Parse a model class like "{smart}", "{balanced}", "{fast}" *)
+(** Parse a model class like "$smart", "$balanced", "$fast" *)
 let parse_model_class (s : string) : model_class option =
   match String.lowercase_ascii s with
-  | "{smart}" -> Some Smart
-  | "{balanced}" -> Some Balanced
-  | "{fast}" -> Some Fast
+  | "$smart" -> Some Smart
+  | "$balanced" -> Some Balanced
+  | "$fast" -> Some Fast
   | _ -> None
 
 (** Parse a phase like "@implementation", "@validation", "@satisfaction(0.8)" *)
@@ -71,7 +71,7 @@ let tokenize (s : string) : string list =
     tokens := Buffer.contents buf :: !tokens;
   List.rev !tokens
 
-(** Parse a label definition heading like "[test] @implementation @validation +code {smart}"
+(** Parse a label definition heading like "[test] @implementation @validation +code $smart"
     Returns label_def option. The heading text comes after "### " *)
 let parse_label_heading ?(glossary : glossary_entry list = []) (heading : string) : label_def option =
   (* Extract label name from [name] *)

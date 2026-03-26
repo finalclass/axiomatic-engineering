@@ -204,29 +204,29 @@ Konteksty (`+markers`) kontrolują który agent dostaje które narzędzia:
 
 ## Klasy modeli
 
-Aksjomaty definiują **klasę** modelu (`{smart}`, `{balanced}`, `{fast}`), nie konkretny model. Orkiestrator mapuje klasy na modele.
+Aksjomaty definiują **klasę** modelu (`$smart`, `$balanced`, `$fast`), nie konkretny model. Orkiestrator mapuje klasy na modele.
 
 ### Składnia w labelach
 
 ```markdown
 ### [test] @implementation @validation +code
 Unit tests. TDD.
-(brak {class} → domyślna per faza: implementation={smart}, validation={balanced})
+(brak $class → domyślna per faza: implementation=$smart, validation=$balanced)
 
-### [security] @validation +code +api {smart}
-Security review — override: {smart} zamiast domyślnego {balanced} dla validation.
+### [security] @validation +code +api $smart
+Security review — override: $smart zamiast domyślnego $balanced dla validation.
 
 ### [ux] @satisfaction(0.8) +browser
-UX review — domyślna klasa dla satisfaction: {fast}.
+UX review — domyślna klasa dla satisfaction: $fast.
 ```
 
 ### Domyślne klasy per faza
 
 | Faza | Domyślna klasa | Uzasadnienie |
 |------|----------------|--------------|
-| `@implementation` | `{smart}` | Generowanie kodu wymaga głębokiego rozumowania |
-| `@validation` | `{balanced}` | Weryfikacja: wystarczająco smart, szybszy |
-| `@satisfaction` | `{fast}` | Browser automation + ocena subiektywna, szybkość kluczowa |
+| `@implementation` | `$smart` | Generowanie kodu wymaga głębokiego rozumowania |
+| `@validation` | `$balanced` | Weryfikacja: wystarczająco smart, szybszy |
+| `@satisfaction` | `$fast` | Browser automation + ocena subiektywna, szybkość kluczowa |
 
 ### Konfiguracja orkiestratora (CLI)
 
@@ -248,7 +248,7 @@ Wszystkie parametry opcjonalne — domyślne wartości poniżej.
 | `--implementer` | `opus4.6` | Step 5: generuje kod, pisze testy |
 | `--planner` | `sonnet4.6` | Step 2: wykrywanie sprzeczności, Step 3: analiza zmian |
 
-**B) Klasy labelowe** — mapowanie `{smart}`, `{balanced}`, `{fast}` na modele (kontrolowane przez aksjomaty):
+**B) Klasy labelowe** — mapowanie `$smart`, `$balanced`, `$fast` na modele (kontrolowane przez aksjomaty):
 
 | Parametr | Domyślnie | Domyślna faza |
 |----------|-----------|---------------|
@@ -438,7 +438,7 @@ Testy pisane w `well_test` (describe/it/matchers). Dane testowe: `example/` proj
 7. **Parsowanie label definitions** — `### [ui] @satisfaction(satisfaction-level) +browser` → faza=Satisfaction(0.7), markers=[Browser]
 8. **Glossary lookup w threshold** — `@satisfaction(satisfaction-level)` → szuka `**satisfaction-level** — 0.7` w glossary → threshold=0.7
 9. **Threshold jako literal** — `@satisfaction(0.85)` → threshold=0.85
-10. **Model class w labelu** — `### [security] @validation +code {smart}` → model_class=Some Smart
+10. **Model class w labelu** — `### [security] @validation +code $smart` → model_class=Some Smart
 11. **Brak model class** — `### [test] @implementation @validation +code` → model_class=None
 
 ### B) Consistency — walidacja spójności (consistency_test.ml)
@@ -466,7 +466,7 @@ Testy pisane w `well_test` (describe/it/matchers). Dane testowe: `example/` proj
 3. **Satisfaction context** — ten sam aksjomat → satisfaction context zawiera [ui] z +browser narzędziami, threshold=0.7
 4. **Holdout** — label z @validation only (bez @implementation) → blok niewidoczny dla implementera
 5. **Domyślna klasa modelu** — task dla @implementation → model_class=Smart, @validation → Balanced, @satisfaction → Fast
-6. **Override klasy** — label z {smart} + @validation → model_class=Smart (nie Balanced)
+6. **Override klasy** — label z $smart + @validation → model_class=Smart (nie Balanced)
 
 ### E) Markers — walidacja @axiom (markers_test.ml)
 

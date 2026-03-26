@@ -27,17 +27,23 @@ let parse_args () : Types.config * bool =
       config := { !config with preprompt = v }; parse rest
     | path :: rest when not (String.length path > 0 && path.[0] = '-') ->
       config := { !config with project_path = path }; parse rest
+    | ("--help" | "-h") :: _ ->
+      Printf.printf "Usage: axioms-sync [PATH] [OPTIONS]\n";
+      Printf.printf "\n";
+      Printf.printf "Options:\n";
+      Printf.printf "  --full              Full sync (not diff)\n";
+      Printf.printf "  -q, --quiet         Suppress agent streaming output\n";
+      Printf.printf "  --implementer MODEL Model alias for implementation\n";
+      Printf.printf "  --planner MODEL     Model alias for planning\n";
+      Printf.printf "  --smart MODEL       Model alias for smart class\n";
+      Printf.printf "  --balanced MODEL    Model alias for balanced class\n";
+      Printf.printf "  --fast MODEL        Model alias for fast class\n";
+      Printf.printf "  --preprompt TEXT    Extra system prompt prepended to every AI call\n";
+      Printf.printf "  -h, --help          Show this help message\n";
+      exit 0
     | unknown :: _ ->
       Printf.eprintf "Unknown argument: %s\n" unknown;
-      Printf.eprintf "Usage: axioms-sync [PATH] [OPTIONS]\n";
-      Printf.eprintf "  --full              Full sync (not diff)\n";
-      Printf.eprintf "  -q, --quiet         Suppress agent streaming output\n";
-      Printf.eprintf "  --implementer MODEL Model alias for implementation\n";
-      Printf.eprintf "  --planner MODEL     Model alias for planning\n";
-      Printf.eprintf "  --smart MODEL       Model alias for smart class\n";
-      Printf.eprintf "  --balanced MODEL    Model alias for balanced class\n";
-      Printf.eprintf "  --fast MODEL        Model alias for fast class\n";
-      Printf.eprintf "  --preprompt TEXT    Extra system prompt prepended to every AI call\n";
+      Printf.eprintf "Run 'axioms-sync --help' for usage.\n";
       exit 1
   in
   parse args;

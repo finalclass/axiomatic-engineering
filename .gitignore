@@ -1,5 +1,11 @@
 .axioms/
 code/
 data/
-node_modules/
-bun.lock
+_build/
+_release/
+*.tar.gz
+*.install
+.merlin
+_opam/
+_esy/
+_docs/

@@ -212,8 +212,8 @@ let () =
     );
 
     (* A10: Model class in label *)
-    it "parses model class {smart} in label heading" (fun () ->
-      let heading = "[security] @validation +code {smart}" in
+    it "parses model class $smart in label heading" (fun () ->
+      let heading = "[security] @validation +code $smart" in
       match Loader.parse_label_heading heading with
       | None -> failwith "expected Some label_def"
       | Some lbl ->
