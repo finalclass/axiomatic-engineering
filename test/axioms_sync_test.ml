@@ -954,7 +954,7 @@ let () =
       let provider : Ai_access.provider = {
         name = "mock";
         send = (fun ~model:_ ~system:_ ~messages:_ ~tools:_ ~max_tokens:_ ->
-          { Ai_access.content = [Text "done"]; stop_reason = "end_turn" });
+          ({ Ai_access.content = [Text "done"]; stop_reason = "end_turn" }, (10, 5)));
       } in
       let result = Ai_access.run_agent
         ~provider
@@ -965,7 +965,9 @@ let () =
         ~execute_tool:(fun _name _input -> "result")
         ~max_iterations:3
       in
-      expect (result = Ok "done") |> to_be_true
+      (match result with
+       | Ok ("done", Some _cost) -> ()
+       | _ -> failwith "expected Ok (\"done\", Some cost)")
     );
 
     (* F4: Agent loop with tool use — mock returns tool_use, then end_turn *)
@@ -977,12 +979,12 @@ let () =
           incr call_count;
           if !call_count = 1 then
             (* First call: return tool_use *)
-            { Ai_access.content = [
+            ({ Ai_access.content = [
                 Tool_use { id = "tu_1"; name = "test_tool"; input = `Assoc [] }
-              ]; stop_reason = "tool_use" }
+              ]; stop_reason = "tool_use" }, (100, 50))
           else
             (* Second call: return end_turn *)
-            { Ai_access.content = [Text "final answer"]; stop_reason = "end_turn" });
+            ({ Ai_access.content = [Text "final answer"]; stop_reason = "end_turn" }, (100, 50)));
       } in
       let tool_executed = ref false in
       let result = Ai_access.run_agent
@@ -999,7 +1001,9 @@ let () =
       in
       expect !tool_executed |> to_be_true;
       expect !call_count |> to_equal_int 2;
-      expect (result = Ok "final answer") |> to_be_true
+      (match result with
+       | Ok ("final answer", Some _) -> ()
+       | _ -> failwith "expected Ok (\"final answer\", Some cost)")
     );
 
     (* F5: Agent loop — max iterations exceeded *)
@@ -1008,9 +1012,9 @@ let () =
         name = "mock";
         send = (fun ~model:_ ~system:_ ~messages:_ ~tools:_ ~max_tokens:_ ->
           (* Always return tool_use, never end_turn *)
-          { Ai_access.content = [
+          ({ Ai_access.content = [
               Tool_use { id = "tu_loop"; name = "loop_tool"; input = `Assoc [] }
-            ]; stop_reason = "tool_use" });
+            ]; stop_reason = "tool_use" }, (10, 10)));
       } in
       let result = Ai_access.run_agent
         ~provider
@@ -1061,7 +1065,7 @@ let () =
     it "format_stream_event parses system init event" (fun () ->
       let json = Yojson.Safe.from_string
         {|{"type":"system","session_id":"abc-123","model":"claude-haiku-4-5-20251001"}|} in
-      let (display, result) = Ai_access.format_stream_event json in
+      let (display, result, _cost) = Ai_access.format_stream_event json in
       (match display with
        | Some s ->
          expect s |> to_contain "abc-123";
@@ -1074,7 +1078,7 @@ let () =
     it "format_stream_event parses assistant text content" (fun () ->
       let json = Yojson.Safe.from_string
         {|{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}|} in
-      let (display, result) = Ai_access.format_stream_event json in
+      let (display, result, _cost) = Ai_access.format_stream_event json in
       (match display with
        | Some s -> expect s |> to_contain "hello world"
        | None -> failwith "expected display text");
@@ -1085,7 +1089,7 @@ let () =
     it "format_stream_event parses assistant tool_use" (fun () ->
       let json = Yojson.Safe.from_string
         {|{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","id":"tu_1","input":{}}]}}|} in
-      let (display, _) = Ai_access.format_stream_event json in
+      let (display, _, _) = Ai_access.format_stream_event json in
       (match display with
        | Some s -> expect s |> to_contain "Edit"
        | None -> failwith "expected display text")
@@ -1095,7 +1099,7 @@ let () =
     it "format_stream_event parses result event" (fun () ->
       let json = Yojson.Safe.from_string
         {|{"type":"result","result":"final output","total_cost_usd":0.0123,"duration_ms":1500}|} in
-      let (display, result) = Ai_access.format_stream_event json in
+      let (display, result, _cost) = Ai_access.format_stream_event json in
       (match display with
        | Some s ->
          expect s |> to_contain "1500ms";
@@ -1109,7 +1113,7 @@ let () =
     (* F-stream5: format_stream_event returns None for unknown type *)
     it "format_stream_event returns None for unknown event type" (fun () ->
       let json = Yojson.Safe.from_string {|{"type":"rate_limit_event"}|} in
-      let (display, result) = Ai_access.format_stream_event json in
+      let (display, result, _cost) = Ai_access.format_stream_event json in
       expect (display = None) |> to_be_true;
       expect (result = None) |> to_be_true
     );
@@ -1128,7 +1132,7 @@ let () =
       (* echo -p "$(cat promptfile)" --system-prompt "$(cat sysfile)" --model test-model ...
          will print all args as text — we just check it doesn't crash and returns Ok *)
       (match result with
-       | Ok output ->
+       | Ok (output, _cost) ->
          expect (String.length output > 0) |> to_be_true
        | Error msg -> failwith ("expected Ok, got Error: " ^ msg))
     );
@@ -1153,7 +1157,7 @@ let () =
       let provider : Ai_access.provider = {
         name = "mock";
         send = (fun ~model:_ ~system:_ ~messages:_ ~tools:_ ~max_tokens:_ ->
-          { Ai_access.content = [Text "http result"]; stop_reason = "end_turn" });
+          ({ Ai_access.content = [Text "http result"]; stop_reason = "end_turn" }, (10, 5)));
       } in
       let result = Ai_access.dispatch
         ~executor:Http
@@ -1164,7 +1168,9 @@ let () =
         ~provider
         ()
       in
-      expect (result = Ok "http result") |> to_be_true
+      (match result with
+       | Ok ("http result", Some _) -> ()
+       | _ -> failwith "expected Ok (\"http result\", Some cost)")
     );
   )
 
@@ -1409,6 +1415,152 @@ let () =
        | None -> failwith "freeze exists, expected Some"
        | Some changes -> expect (List.length changes) |> to_be_greater_than 0);
 
+      rm_rf dir
+    );
+  )
+
+(* ============================================================ *)
+(* J) Cost tracking tests                                       *)
+(* ============================================================ *)
+
+let () =
+  describe "Cost tracking" (fun () ->
+
+    it "cost_info type has correct fields" (fun () ->
+      let cost : Types.cost_info = { cost_usd = 0.05; input_tokens = 1000; output_tokens = 500 } in
+      expect cost.cost_usd |> to_equal_float 0.05;
+      expect cost.input_tokens |> to_equal_int 1000;
+      expect cost.output_tokens |> to_equal_int 500
+    );
+
+    it "format_stream_event extracts cost from result event with usage" (fun () ->
+      let json = Yojson.Safe.from_string
+        {|{"type":"result","result":"out","total_cost_usd":0.05,"duration_ms":100,"usage":{"input_tokens":1000,"output_tokens":500}}|} in
+      let (_display, _result, cost) = Ai_access.format_stream_event json in
+      (match cost with
+       | None -> failwith "expected Some cost_info"
+       | Some c ->
+         expect c.cost_usd |> to_equal_float 0.05;
+         expect c.input_tokens |> to_equal_int 1000;
+         expect c.output_tokens |> to_equal_int 500)
+    );
+
+    it "format_stream_event returns None cost when no total_cost_usd" (fun () ->
+      let json = Yojson.Safe.from_string
+        {|{"type":"result","result":"out","duration_ms":100}|} in
+      let (_display, _result, cost) = Ai_access.format_stream_event json in
+      expect (cost = None) |> to_be_true
+    );
+
+    it "run_agent accumulates cost across iterations" (fun () ->
+      let call_count = ref 0 in
+      let provider : Ai_access.provider = {
+        name = "mock";
+        send = (fun ~model:_ ~system:_ ~messages:_ ~tools:_ ~max_tokens:_ ->
+          incr call_count;
+          if !call_count = 1 then
+            ({ Ai_access.content = [
+                Tool_use { id = "tu_1"; name = "t"; input = `Assoc [] }
+              ]; stop_reason = "tool_use" }, (100, 50))
+          else
+            ({ Ai_access.content = [Text "done"]; stop_reason = "end_turn" }, (200, 100)));
+      } in
+      let result = Ai_access.run_agent
+        ~provider ~model:"test" ~system:"sys" ~prompt:"p"
+        ~tools:[] ~execute_tool:(fun _ _ -> "r") ~max_iterations:5
+      in
+      (match result with
+       | Ok (_, Some cost) ->
+         expect cost.input_tokens |> to_equal_int 300;
+         expect cost.output_tokens |> to_equal_int 150
+       | _ -> failwith "expected Ok with cost")
+    );
+
+    it "estimate_cost_usd calculates correctly for haiku" (fun () ->
+      let cost = Ai_access.estimate_cost_usd
+        ~model:"claude-haiku-4-5-20251001" ~input_tokens:1_000_000 ~output_tokens:1_000_000 in
+      (* haiku: $0.25/M input + $1.25/M output = $1.50 *)
+      expect (Float.abs (cost -. 1.50) < 0.01) |> to_be_true
+    );
+
+    it "config defaults: dry_run=false, max_cycles=3" (fun () ->
+      let cfg = Types.default_config in
+      expect cfg.dry_run |> to_be_false;
+      expect cfg.max_cycles |> to_equal_int 3
+    );
+  )
+
+(* ============================================================ *)
+(* K) Semantic contradiction detection tests                    *)
+(* ============================================================ *)
+
+let () =
+  describe "Semantic consistency" (fun () ->
+
+    it "check_semantic returns Ok when dispatch returns NO_CONTRADICTIONS" (fun () ->
+      let dispatch ~system:_ ~prompt:_ = Ok "NO_CONTRADICTIONS" in
+      let result = Consistency.check_semantic ~dispatch "axiom content" in
+      (match result with
+       | Ok () -> ()
+       | Error msg -> failwith ("expected Ok, got Error: " ^ msg))
+    );
+
+    it "check_semantic returns Error when dispatch finds contradictions" (fun () ->
+      let dispatch ~system:_ ~prompt:_ = Ok "Contradiction: A conflicts with B" in
+      let result = Consistency.check_semantic ~dispatch "axiom content" in
+      (match result with
+       | Ok () -> failwith "expected Error"
+       | Error msg -> expect msg |> to_contain "Contradiction")
+    );
+
+    it "check_semantic returns Error when dispatch fails" (fun () ->
+      let dispatch ~system:_ ~prompt:_ = Error "API error" in
+      let result = Consistency.check_semantic ~dispatch "axiom content" in
+      (match result with
+       | Ok () -> failwith "expected Error"
+       | Error msg -> expect msg |> to_contain "API error")
+    );
+  )
+
+(* ============================================================ *)
+(* L) Sync result tests                                         *)
+(* ============================================================ *)
+
+let () =
+  describe "Sync result" (fun () ->
+
+    it "render produces markdown with YAML frontmatter" (fun () ->
+      let summary : Sync_result.sync_summary = {
+        total_cost = 0.1234;
+        outcomes = [
+          { axiom_id = "a.md"; label = "test"; phase = "implementation"; status = "ok"; output = "done" };
+          { axiom_id = "b.md"; label = "ui"; phase = "satisfaction(0.7)"; status = "error"; output = "failed" };
+        ];
+        mode = "diff";
+      } in
+      let md = Sync_result.render summary in
+      expect md |> to_contain "---";
+      expect md |> to_contain "mode: diff";
+      expect md |> to_contain "total_cost_usd: 0.1234";
+      expect md |> to_contain "tasks: 2";
+      expect md |> to_contain "passed: 1";
+      expect md |> to_contain "failed: 1";
+      expect md |> to_contain "| a.md | test | implementation | ok |";
+      expect md |> to_contain "| b.md | ui | satisfaction(0.7) | error |"
+    );
+
+    it "write creates .axioms/sync-result.md" (fun () ->
+      let dir = make_temp_dir "sync-result-write" in
+      let summary : Sync_result.sync_summary = {
+        total_cost = 0.0;
+        outcomes = [];
+        mode = "full";
+      } in
+      Sync_result.write ~project_path:dir summary;
+      let path = Filename.concat (Filename.concat dir ".axioms") "sync-result.md" in
+      expect (Sys.file_exists path) |> to_be_true;
+      let content = read_file path in
+      expect content |> to_contain "mode: full";
       rm_rf dir
     );
   )

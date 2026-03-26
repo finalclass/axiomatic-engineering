@@ -1,5 +1,11 @@
 (** Core types for axioms-sync *)
 
+type cost_info = {
+  cost_usd: float;
+  input_tokens: int;
+  output_tokens: int;
+}
+
 type phase =
   | Implementation
   | Validation
@@ -69,6 +75,8 @@ type config = {
   balanced: string;
   fast: string;
   preprompt: string; (** extra system prompt prepended to every AI call *)
+  dry_run: bool;
+  max_cycles: int;
 }
 
 let default_config = {
@@ -80,6 +88,8 @@ let default_config = {
   balanced = "sonnet4.6";
   fast = "haiku4.5";
   preprompt = "";
+  dry_run = false;
+  max_cycles = 3;
 }
 
 (** Resolve model class for a task. Label override takes priority, then phase default. *)

@@ -43,6 +43,7 @@ let provider () : provider =
       if status >= 400 then
         failwith (Printf.sprintf "Anthropic API error %d: %s" status resp_body);
       let json = Yojson.Safe.from_string resp_body in
-      response_of_json json
+      let (resp, usage) = response_of_json json in
+      (resp, usage)
     );
   }

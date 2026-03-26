@@ -13,6 +13,10 @@ let parse_args () : Types.config * bool =
       config := { !config with mode = `Full }; parse rest
     | ("--quiet" | "-q") :: rest ->
       quiet := true; parse rest
+    | "--dry-run" :: rest ->
+      config := { !config with dry_run = true }; parse rest
+    | "--max-cycles" :: v :: rest ->
+      config := { !config with max_cycles = int_of_string v }; parse rest
     | "--implementer" :: v :: rest ->
       config := { !config with implementer = v }; parse rest
     | "--planner" :: v :: rest ->
@@ -32,6 +36,8 @@ let parse_args () : Types.config * bool =
       Printf.printf "\n";
       Printf.printf "Options:\n";
       Printf.printf "  --full              Full sync (not diff)\n";
+      Printf.printf "  --dry-run           Show task table and exit without AI calls\n";
+      Printf.printf "  --max-cycles N      Max fix cycles (default: 3)\n";
       Printf.printf "  -q, --quiet         Suppress agent streaming output\n";
       Printf.printf "  --implementer MODEL Model alias for implementation\n";
       Printf.printf "  --planner MODEL     Model alias for planning\n";
@@ -87,7 +93,7 @@ let prompt_of_task (task : Types.task) : string =
       Return your rating as a number on the last line." task.axiom_id task.label.name threshold
 
 (** Run the planner model to create an implementation plan for a task *)
-let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?provider (task : Types.task) : string option =
+let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ~(total_cost : float ref) ?provider (task : Types.task) : string option =
   let planner_alias = config.planner in
   let model_id = match Ai_access.resolve_alias planner_alias with
     | Some (_, id) -> id
@@ -122,7 +128,8 @@ let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?p
     ?provider ~tools:read_only_tools ~execute_tool:(Tools.execute ~base_dir:code_dir)
     ~max_iterations:10 ()
   with
-  | Ok plan ->
+  | Ok (plan, cost) ->
+    (match cost with Some c -> total_cost := !total_cost +. c.cost_usd | None -> ());
     Printf.printf "done\n%!";
     Some plan
   | Error msg ->
@@ -131,7 +138,7 @@ let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?p
 
 (** Run a single task — executor is resolved from model alias by ai_access.
     If plan is provided, it's injected into the implementation prompt. *)
-let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?provider ?plan (task : Types.task) : (string, string) result =
+let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ~(total_cost : float ref) ?provider ?plan (task : Types.task) : (string, string) result =
   let model_alias = Types.model_alias_of_class config task.model_class in
   let model_id = match Ai_access.resolve_alias model_alias with
     | Some (_, id) -> id
@@ -145,10 +152,15 @@ let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?prov
     | None -> prompt_of_task task
   in
   let tools = Tools.tool_defs_for_markers task.label.markers in
-  Ai_access.dispatch
+  match Ai_access.dispatch
     ~executor ~model:model_id ~system ~prompt ~cwd:code_dir ~quiet
     ?provider ~tools ~execute_tool:(Tools.execute ~base_dir:code_dir)
     ~max_iterations:25 ()
+  with
+  | Ok (text, cost) ->
+    (match cost with Some c -> total_cost := !total_cost +. c.cost_usd | None -> ());
+    Ok text
+  | Error e -> Error e
 
 (** Parse HTTP response from raw socket data *)
 let parse_http_response (data : string) : int * string =
@@ -305,6 +317,29 @@ let () =
     exit 0
   end;
 
+  (* Feature 2: --dry-run — print task table and exit *)
+  if config.dry_run then begin
+    section "Dry run — task table";
+    Printf.printf "%-16s %-20s %-30s %-10s\n%!" "Phase" "Label" "Axiom" "Model";
+    Printf.printf "%s\n%!" (String.make 80 '-');
+    let print_task (task : Types.task) =
+      let phase_str = match task.phase with
+        | Types.Implementation -> "implementation"
+        | Validation -> "validation"
+        | Satisfaction f -> Printf.sprintf "satisfaction(%.1f)" f
+      in
+      let model_str = match task.model_class with
+        | Smart -> "smart" | Balanced -> "balanced" | Fast -> "fast"
+      in
+      Printf.printf "%-16s %-20s %-30s %-10s\n%!" phase_str task.label.name task.axiom_id model_str
+    in
+    List.iter print_task impl_tasks;
+    List.iter print_task valid_tasks;
+    List.iter print_task satisfy_tasks;
+    Printf.printf "\nDry run complete. No AI calls made.\n%!";
+    exit 0
+  end;
+
   let all_tasks = impl_tasks @ valid_tasks @ satisfy_tasks in
 
   (* Wire HTTP client only if needed *)
@@ -317,45 +352,108 @@ let () =
     provider := Some (Anthropic.provider ())
   end;
 
+  (* Feature 1: Cost tracking *)
+  let total_cost = ref 0.0 in
+
+  (* Feature 5: Semantic contradiction detection *)
+  let semantic_axioms = match changes with
+    | Some ch ->
+      let changed_ids = List.map fst ch in
+      List.filter (fun (a : Types.axiom) -> List.mem a.id changed_ids) system.axioms
+    | None -> system.axioms
+  in
+  if semantic_axioms <> [] then begin
+    section "Semantic consistency";
+    let axiom_texts = List.map (fun (a : Types.axiom) ->
+      Printf.sprintf "## %s\n%s" a.name a.raw_content
+    ) semantic_axioms in
+    let combined = String.concat "\n\n" axiom_texts in
+    (match Consistency.check_semantic
+      ~dispatch:(fun ~system ~prompt ->
+        let fast_alias = config.fast in
+        let model_id = match Ai_access.resolve_alias fast_alias with
+          | Some (_, id) -> id
+          | None -> failwith (Printf.sprintf "Unknown fast model alias: %s" fast_alias)
+        in
+        let executor = Ai_access.executor_for_alias fast_alias in
+        match Ai_access.dispatch
+          ~executor ~model:model_id ~system ~prompt ~cwd:project_path ~quiet:true
+          ?provider:!provider ()
+        with
+        | Ok (text, cost) ->
+          (match cost with Some c -> total_cost := !total_cost +. c.cost_usd | None -> ());
+          Ok text
+        | Error e -> Error e)
+      combined
+    with
+    | Ok () -> Printf.printf "No contradictions found.\n%!"
+    | Error msg ->
+      Printf.eprintf "Semantic contradiction detected:\n%s\n" msg;
+      exit 1)
+  end;
+
+  (* Feature 6: sync-result tracking *)
+  let outcomes : Sync_result.task_outcome list ref = ref [] in
+  let record_outcome ~(task : Types.task) ~status ~output =
+    outcomes := { Sync_result.axiom_id = task.axiom_id; label = task.label.name;
+                  phase = (match task.phase with
+                    | Implementation -> "implementation"
+                    | Validation -> "validation"
+                    | Satisfaction f -> Printf.sprintf "satisfaction(%.1f)" f);
+                  status; output } :: !outcomes
+  in
+
   let run task =
     Printf.printf "  [%s] %s ... %!" task.Types.label.name task.axiom_id;
-    match run_task ~config ~code_dir ~quiet ?provider:!provider task with
-    | Ok text -> (text, true)
-    | Error msg -> Printf.printf "FAILED: %s\n%!" msg; ("", false)
+    match run_task ~config ~code_dir ~quiet ~total_cost ?provider:!provider task with
+    | Ok text ->
+      record_outcome ~task ~status:"ok" ~output:(String.sub text 0 (min 200 (String.length text)));
+      (text, true)
+    | Error msg ->
+      Printf.printf "FAILED: %s\n%!" msg;
+      record_outcome ~task ~status:"error" ~output:msg;
+      ("", false)
   in
 
   if impl_tasks <> [] then begin
     (* Step 5a: Planning *)
     section "Planning";
     let plans = List.map (fun task ->
-      (task, run_planner ~config ~code_dir ~quiet ?provider:!provider task)
+      (task, run_planner ~config ~code_dir ~quiet ~total_cost ?provider:!provider task)
     ) impl_tasks in
 
     (* Step 5b: Implementation with plans *)
     section "Implementation";
     List.iter (fun (task, plan) ->
       Printf.printf "  [%s] %s ... %!" task.Types.label.name task.axiom_id;
-      match run_task ~config ~code_dir ~quiet ?provider:!provider ?plan task with
-      | Ok _text -> Printf.printf "done\n%!"
-      | Error msg -> Printf.printf "FAILED: %s\n%!" msg
+      match run_task ~config ~code_dir ~quiet ~total_cost ?provider:!provider ?plan task with
+      | Ok _text ->
+        Printf.printf "done\n%!";
+        record_outcome ~task ~status:"ok" ~output:"implemented"
+      | Error msg ->
+        Printf.printf "FAILED: %s\n%!" msg;
+        record_outcome ~task ~status:"error" ~output:msg
     ) plans
   end;
 
+  (* Feature 3: Eio.Fiber.all for validation and satisfaction *)
   if valid_tasks <> [] then begin
     section "Validation";
-    List.iter (fun task ->
+    Eio_main.run @@ fun _env ->
+    Eio.Fiber.all (List.map (fun task () ->
       let (text, ok) = run task in
       if ok then begin
         let preview = String.sub text 0 (min 200 (String.length text)) in
         Printf.printf "done\n  %s\n%!" preview
       end
-    ) valid_tasks
+    ) valid_tasks)
   end;
 
   if satisfy_tasks <> [] then begin
     section "Satisfaction";
     let all_pass = ref true in
-    List.iter (fun (task : Types.task) ->
+    Eio_main.run @@ fun _env ->
+    Eio.Fiber.all (List.map (fun (task : Types.task) () ->
       let (text, ok) = run task in
       if ok then begin
         let lines = String.split_on_char '\n' text |> List.filter (fun s -> String.trim s <> "") in
@@ -374,13 +472,93 @@ let () =
           Printf.printf "done (no rating parsed)\n  %s\n%!" preview)
       end else
         all_pass := false
-    ) satisfy_tasks;
+    ) satisfy_tasks);
     if not !all_pass then begin
       Printf.eprintf "\nSome satisfaction checks failed.\n";
       exit 1
     end
   end;
 
+  (* Feature 4: Fix cycle *)
+  let failing_axiom_ids = !outcomes
+    |> List.filter (fun (o : Sync_result.task_outcome) ->
+      o.status = "error" && (String.length o.phase >= 10 &&
+        (String.sub o.phase 0 10 = "validation" || String.sub o.phase 0 12 = "satisfaction"
+         || String.sub o.phase 0 14 = "implementation")))
+    |> List.map (fun (o : Sync_result.task_outcome) -> o.axiom_id)
+    |> List.sort_uniq String.compare
+  in
+  if failing_axiom_ids <> [] && config.max_cycles > 0 then begin
+    section "Fix cycle";
+    let cycle = ref 0 in
+    let still_failing = ref failing_axiom_ids in
+    while !still_failing <> [] && !cycle < config.max_cycles do
+      incr cycle;
+      Printf.printf "Cycle %d/%d — re-implementing %d axiom(s)\n%!"
+        !cycle config.max_cycles (List.length !still_failing);
+      let failing_errors = !outcomes
+        |> List.filter (fun (o : Sync_result.task_outcome) ->
+          o.status = "error" && List.mem o.axiom_id !still_failing)
+        |> List.map (fun (o : Sync_result.task_outcome) ->
+          Printf.sprintf "[%s] %s: %s" o.label o.phase o.output)
+      in
+      let feedback = String.concat "\n" failing_errors in
+      (* Re-implement failing axioms *)
+      let fix_impl_tasks = List.filter (fun (t : Types.task) ->
+        List.mem t.axiom_id !still_failing
+      ) impl_tasks in
+      List.iter (fun task ->
+        Printf.printf "  fix [%s] %s ... %!" task.Types.label.name task.axiom_id;
+        let fix_prompt = Printf.sprintf
+          "%s\n\nPrevious attempt failed with these errors:\n%s\n\nFix the issues."
+          (prompt_of_task task) feedback
+        in
+        let model_alias = Types.model_alias_of_class config task.model_class in
+        let model_id = match Ai_access.resolve_alias model_alias with
+          | Some (_, id) -> id | None -> failwith "Unknown model alias" in
+        let executor = Ai_access.executor_for_alias model_alias in
+        let system = system_prompt_of_task ~config ~code_dir task in
+        let tools = Tools.tool_defs_for_markers task.label.markers in
+        match Ai_access.dispatch
+          ~executor ~model:model_id ~system ~prompt:fix_prompt ~cwd:code_dir ~quiet
+          ?provider:!provider ~tools ~execute_tool:(Tools.execute ~base_dir:code_dir)
+          ~max_iterations:25 ()
+        with
+        | Ok (_text, cost) ->
+          (match cost with Some c -> total_cost := !total_cost +. c.cost_usd | None -> ());
+          Printf.printf "done\n%!";
+          record_outcome ~task ~status:"ok" ~output:"fixed"
+        | Error msg ->
+          Printf.printf "FAILED: %s\n%!" msg;
+          record_outcome ~task ~status:"error" ~output:msg
+      ) fix_impl_tasks;
+      (* Re-validate *)
+      let fix_valid_tasks = List.filter (fun (t : Types.task) ->
+        List.mem t.axiom_id !still_failing
+      ) (valid_tasks @ satisfy_tasks) in
+      let new_failures = ref [] in
+      List.iter (fun task ->
+        let (_text, ok) = run task in
+        if not ok then
+          new_failures := task.Types.axiom_id :: !new_failures
+      ) fix_valid_tasks;
+      still_failing := List.sort_uniq String.compare !new_failures
+    done;
+    if !still_failing <> [] then begin
+      Printf.eprintf "Fix cycle exhausted. Still failing: %s\n"
+        (String.concat ", " !still_failing);
+      exit 1
+    end
+  end;
+
+  (* Feature 6: Write sync-result.md *)
+  let summary : Sync_result.sync_summary = {
+    total_cost = !total_cost;
+    outcomes = List.rev !outcomes;
+    mode = (match config.mode with `Full -> "full" | `Diff -> "diff");
+  } in
+  Sync_result.write ~project_path summary;
+
   section "Saving freeze";
   Snapshot.save_freeze ~project_path;
-  Printf.printf "Sync complete.\n%!"
+  Printf.printf "Sync complete. Total cost: $%.4f\n%!" !total_cost

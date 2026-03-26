@@ -64,6 +64,28 @@ let check (system : axiom_system) : (unit, error list) result =
   if errors = [] then Ok ()
   else Error errors
 
+(** Check for semantic contradictions using AI.
+    dispatch is a callback to avoid coupling to ai_access. *)
+let check_semantic
+    ~(dispatch : system:string -> prompt:string -> (string, string) result)
+    (axiom_content : string)
+  : (unit, string) result =
+  let system = "You are a consistency checker. Analyze the axioms below for semantic \
+    contradictions — requirements that conflict with each other, impossible constraints, \
+    or mutually exclusive goals. If you find NO contradictions, respond with exactly: \
+    NO_CONTRADICTIONS. If you find contradictions, describe each one clearly." in
+  let prompt = Printf.sprintf "Analyze these axioms for contradictions:\n\n%s" axiom_content in
+  match dispatch ~system ~prompt with
+  | Error e -> Error (Printf.sprintf "Semantic check failed: %s" e)
+  | Ok text ->
+    let trimmed = String.trim text in
+    let needle = "NO_CONTRADICTIONS" in
+    let nlen = String.length needle in
+    if String.length trimmed >= nlen &&
+       String.uppercase_ascii (String.sub trimmed 0 nlen) = needle
+    then Ok ()
+    else Error text
+
 (** Format error for display *)
 let error_to_string = function
   | Missing_link { from_axiom; target } ->

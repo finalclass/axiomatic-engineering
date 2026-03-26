@@ -9,3 +9,4 @@ module Markers = Markers
 module Ai_access = Ai_access
 module Anthropic = Anthropic
 module Tools = Tools
+module Sync_result = Sync_result

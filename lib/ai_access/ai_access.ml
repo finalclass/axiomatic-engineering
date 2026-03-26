@@ -38,7 +38,7 @@ type provider = {
     messages:message list ->
     tools:tool_def list ->
     max_tokens:int ->
-    response;
+    response * (int * int);
 }
 
 (** Known model aliases -> (provider_name, full_model_id) *)
@@ -108,14 +108,23 @@ let content_of_json (json : Yojson.Safe.t) : content option =
     Some (Tool_use { id; name; input })
   | _ -> None
 
+(** Parse usage from API response JSON *)
+let usage_of_json (json : Yojson.Safe.t) : (int * int) =
+  let open Yojson.Safe.Util in
+  let usage = json |> member "usage" in
+  let input_tokens = usage |> member "input_tokens" |> to_int_option |> Option.value ~default:0 in
+  let output_tokens = usage |> member "output_tokens" |> to_int_option |> Option.value ~default:0 in
+  (input_tokens, output_tokens)
+
 (** Parse response from JSON *)
-let response_of_json (json : Yojson.Safe.t) : response =
+let response_of_json (json : Yojson.Safe.t) : response * (int * int) =
   let open Yojson.Safe.Util in
   let content_list = json |> member "content" |> to_list in
   let content = List.filter_map content_of_json content_list in
   let stop_reason = json |> member "stop_reason" |> to_string_option
     |> Option.value ~default:"end_turn" in
-  { content; stop_reason }
+  let usage = usage_of_json json in
+  ({ content; stop_reason }, usage)
 
 (** Extract all text content from a response *)
 let response_text (resp : response) : string =
@@ -131,6 +140,17 @@ let extract_tool_uses (content : content list) : (string * string * Yojson.Safe.
     | _ -> None
   ) content
 
+(** Estimate cost from token counts. Rough pricing per model. *)
+let estimate_cost_usd ~(model : string) ~(input_tokens : int) ~(output_tokens : int) : float =
+  let (inp_per_m, out_per_m) = match model with
+    | m when String.length m >= 11 && String.sub m 0 11 = "claude-opus" -> (15.0, 75.0)
+    | m when String.length m >= 13 && String.sub m 0 13 = "claude-sonnet" -> (3.0, 15.0)
+    | m when String.length m >= 12 && String.sub m 0 12 = "claude-haiku" -> (0.25, 1.25)
+    | _ -> (3.0, 15.0) (* default to sonnet pricing *)
+  in
+  (float_of_int input_tokens *. inp_per_m /. 1_000_000.0) +.
+  (float_of_int output_tokens *. out_per_m /. 1_000_000.0)
+
 (** Run an agent loop: send prompt, execute tool calls, repeat until end_turn *)
 let run_agent
     ~(provider : provider)
@@ -140,16 +160,20 @@ let run_agent
     ~(tools : tool_def list)
     ~(execute_tool : string -> Yojson.Safe.t -> string)
     ~(max_iterations : int)
-  : (string, string) result =
+  : (string * Types.cost_info option, string) result =
   let messages = ref [{ role = User; content = [Text prompt] }] in
   let iteration = ref 0 in
   let finished = ref false in
   let final_text = ref "" in
+  let total_input = ref 0 in
+  let total_output = ref 0 in
 
   while not !finished && !iteration < max_iterations do
     incr iteration;
-    let resp = provider.send
+    let (resp, (inp, outp)) = provider.send
       ~model ~system ~messages:!messages ~tools ~max_tokens:8192 in
+    total_input := !total_input + inp;
+    total_output := !total_output + outp;
 
     if resp.stop_reason = "tool_use" then begin
       (* Add assistant message with tool_use blocks *)
@@ -171,19 +195,27 @@ let run_agent
     end
   done;
 
-  if !finished then Ok !final_text
+  if !finished then begin
+    let cost = estimate_cost_usd ~model ~input_tokens:!total_input ~output_tokens:!total_output in
+    let cost_info : Types.cost_info = {
+      cost_usd = cost;
+      input_tokens = !total_input;
+      output_tokens = !total_output;
+    } in
+    Ok (!final_text, Some cost_info)
+  end
   else Error (Printf.sprintf "Agent exceeded max iterations (%d)" max_iterations)
 
 (** Format a stream-json event for display.
-    Returns (text_to_print, is_result, result_text). *)
-let format_stream_event (json : Yojson.Safe.t) : string option * string option =
+    Returns (text_to_print, result_text, cost_info). *)
+let format_stream_event (json : Yojson.Safe.t) : string option * string option * Types.cost_info option =
   let open Yojson.Safe.Util in
   let typ = json |> member "type" |> to_string_option in
   match typ with
   | Some "system" ->
     let session = json |> member "session_id" |> to_string_option |> Option.value ~default:"?" in
     let model = json |> member "model" |> to_string_option |> Option.value ~default:"?" in
-    (Some (Printf.sprintf "    session=%s model=%s\n" session model), None)
+    (Some (Printf.sprintf "    session=%s model=%s\n" session model), None, None)
   | Some "assistant" ->
     let msg = json |> member "message" in
     let content_list = msg |> member "content" |> to_list in
@@ -198,17 +230,24 @@ let format_stream_event (json : Yojson.Safe.t) : string option * string option =
         Some (Printf.sprintf "    → tool: %s\n" name)
       | _ -> None
     ) content_list in
-    if texts <> [] then (Some (String.concat "" texts), None)
-    else (None, None)
+    if texts <> [] then (Some (String.concat "" texts), None, None)
+    else (None, None, None)
   | Some "result" ->
     let result = json |> member "result" |> to_string_option |> Option.value ~default:"" in
     let cost = json |> member "total_cost_usd" |> to_float_option in
     let duration = json |> member "duration_ms" |> to_int_option in
+    let usage = json |> member "usage" in
+    let input_tokens = (match usage with `Null -> 0 | _ -> usage |> member "input_tokens" |> to_int_option |> Option.value ~default:0) in
+    let output_tokens = (match usage with `Null -> 0 | _ -> usage |> member "output_tokens" |> to_int_option |> Option.value ~default:0) in
+    let cost_info : Types.cost_info option = match cost with
+      | Some c -> Some { cost_usd = c; input_tokens; output_tokens }
+      | None -> None
+    in
     let summary = Printf.sprintf "    done (%s%s)\n"
       (match duration with Some d -> Printf.sprintf "%dms" d | None -> "")
       (match cost with Some c -> Printf.sprintf ", $%.4f" c | None -> "") in
-    (Some summary, Some result)
-  | _ -> (None, None)
+    (Some summary, Some result, cost_info)
+  | _ -> (None, None, None)
 
 (** Run a task via CLI executor (e.g. claude -p) with stream-json output.
     The CLI manages its own agent loop and tools. *)
@@ -219,7 +258,7 @@ let run_cli
     ~(prompt : string)
     ~(cwd : string)
     ~(quiet : bool)
-  : (string, string) result =
+  : (string * Types.cost_info option, string) result =
   let sys_file = Filename.temp_file "axiom-sys" ".txt" in
   let prompt_file = Filename.temp_file "axiom-prompt" ".txt" in
   let oc = Out_channel.open_text sys_file in
@@ -232,6 +271,7 @@ let run_cli
     (Filename.quote cwd) command (Filename.quote prompt_file) (Filename.quote sys_file) (Filename.quote model) in
   let ic = Unix.open_process_in cmd in
   let result_text = ref "" in
+  let cost_ref = ref None in
   let raw_output = Buffer.create 4096 in
   (try while true do
     let line = input_line ic in
@@ -240,10 +280,11 @@ let run_cli
     (* Try to parse as JSON and display *)
     (try
       let json = Yojson.Safe.from_string line in
-      let (display, result) = format_stream_event json in
+      let (display, result, cost) = format_stream_event json in
       if not quiet then
         (match display with Some s -> print_string s; flush stdout | None -> ());
-      (match result with Some r -> result_text := r | None -> ())
+      (match result with Some r -> result_text := r | None -> ());
+      (match cost with Some _ -> cost_ref := cost | None -> ())
     with Yojson.Json_error _ ->
       (* Not JSON — raw output from claude *)
       if not quiet then begin
@@ -255,8 +296,8 @@ let run_cli
   Sys.remove prompt_file;
   match status with
   | Unix.WEXITED 0 ->
-    if !result_text <> "" then Ok !result_text
-    else Ok (Buffer.contents raw_output)
+    if !result_text <> "" then Ok (!result_text, !cost_ref)
+    else Ok (Buffer.contents raw_output, !cost_ref)
   | Unix.WEXITED code -> Error (Printf.sprintf "CLI exited with code %d:\n%s" code (Buffer.contents raw_output))
   | Unix.WSIGNALED s -> Error (Printf.sprintf "CLI killed by signal %d" s)
   | Unix.WSTOPPED s -> Error (Printf.sprintf "CLI stopped by signal %d" s)
@@ -276,7 +317,7 @@ let dispatch
     ?(execute_tool = fun _ _ -> "")
     ?(max_iterations = 25)
     ()
-  : (string, string) result =
+  : (string * Types.cost_info option, string) result =
   match executor with
   | Cli command ->
     run_cli ~command ~model ~system ~prompt ~cwd ~quiet
