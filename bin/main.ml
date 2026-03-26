@@ -29,6 +29,8 @@ let parse_args () : Types.config * bool =
       config := { !config with fast = v }; parse rest
     | "--preprompt" :: v :: rest ->
       config := { !config with preprompt = v }; parse rest
+    | "--no-semantic" :: rest ->
+      config := { !config with no_semantic = true }; parse rest
     | path :: rest when not (String.length path > 0 && path.[0] = '-') ->
       config := { !config with project_path = path }; parse rest
     | ("--help" | "-h") :: _ ->
@@ -45,6 +47,7 @@ let parse_args () : Types.config * bool =
       Printf.printf "  --balanced MODEL    Model alias for balanced class\n";
       Printf.printf "  --fast MODEL        Model alias for fast class\n";
       Printf.printf "  --preprompt TEXT    Extra system prompt prepended to every AI call\n";
+      Printf.printf "  --no-semantic       Skip semantic contradiction check\n";
       Printf.printf "  -h, --help          Show this help message\n";
       exit 0
     | unknown :: _ ->
@@ -86,7 +89,8 @@ let prompt_of_task (task : Types.task) : string =
       Use @axiom markers to trace code back to the axiom file." task.axiom_id task.label.name
   | Validation ->
     Printf.sprintf "Validate the implementation of axiom '%s' for label [%s]. \
-      Report any issues found." task.axiom_id task.label.name
+      Report any issues found. End your response with exactly VALIDATION_PASS if everything is OK, \
+      or VALIDATION_FAIL if there are any issues." task.axiom_id task.label.name
   | Satisfaction threshold ->
     Printf.sprintf "Review the implementation of axiom '%s' for label [%s]. \
       Rate satisfaction from 0.0 to 1.0 (threshold: %.1f). \
@@ -362,7 +366,7 @@ let () =
       List.filter (fun (a : Types.axiom) -> List.mem a.id changed_ids) system.axioms
     | None -> system.axioms
   in
-  if semantic_axioms <> [] then begin
+  if semantic_axioms <> [] && not config.no_semantic then begin
     section "Semantic consistency";
     let axiom_texts = List.map (fun (a : Types.axiom) ->
       Printf.sprintf "## %s\n%s" a.name a.raw_content
@@ -404,7 +408,13 @@ let () =
   in
 
   let run task =
-    Printf.printf "  [%s] %s ... %!" task.Types.label.name task.axiom_id;
+    let model_alias = Types.model_alias_of_class config task.Types.model_class in
+    let phase_str = match task.phase with
+      | Types.Implementation -> "impl"
+      | Validation -> "valid"
+      | Satisfaction f -> Printf.sprintf "sat(%.1f)" f
+    in
+    Printf.printf "  [%s] %s %s (%s)\n%!" task.Types.label.name task.axiom_id phase_str model_alias;
     match run_task ~config ~code_dir ~quiet ~total_cost ?provider:!provider task with
     | Ok text ->
       record_outcome ~task ~status:"ok" ~output:(String.sub text 0 (min 200 (String.length text)));
@@ -425,7 +435,8 @@ let () =
     (* Step 5b: Implementation with plans *)
     section "Implementation";
     List.iter (fun (task, plan) ->
-      Printf.printf "  [%s] %s ... %!" task.Types.label.name task.axiom_id;
+      let model_alias = Types.model_alias_of_class config task.Types.model_class in
+      Printf.printf "  [%s] %s impl (%s)\n%!" task.Types.label.name task.axiom_id model_alias;
       match run_task ~config ~code_dir ~quiet ~total_cost ?provider:!provider ?plan task with
       | Ok _text ->
         Printf.printf "done\n%!";
@@ -436,6 +447,18 @@ let () =
     ) plans
   end;
 
+  (* Check if validation output indicates failure *)
+  let validation_failed text =
+    let lines = String.split_on_char '\n' text
+      |> List.filter (fun s -> String.trim s <> "")
+      |> List.rev in
+    match lines with
+    | last :: _ ->
+      let last = String.trim last in
+      last = "VALIDATION_FAIL" || last = "FAIL"
+    | [] -> false
+  in
+
   (* Feature 3: Eio.Fiber.all for validation and satisfaction *)
   if valid_tasks <> [] then begin
     section "Validation";
@@ -443,8 +466,20 @@ let () =
     Eio.Fiber.all (List.map (fun task () ->
       let (text, ok) = run task in
       if ok then begin
-        let preview = String.sub text 0 (min 200 (String.length text)) in
-        Printf.printf "done\n  %s\n%!" preview
+        if validation_failed text then begin
+          let preview = String.sub text 0 (min 200 (String.length text)) in
+          Printf.printf "FAILED\n  %s\n%!" preview;
+          (* Override the outcome recorded by run *)
+          outcomes := List.map (fun (o : Sync_result.task_outcome) ->
+            if o.axiom_id = task.Types.axiom_id && o.label = task.label.name
+               && o.status = "ok" then
+              { o with status = "failed"; output = String.sub text 0 (min 500 (String.length text)) }
+            else o
+          ) !outcomes
+        end else begin
+          let preview = String.sub text 0 (min 200 (String.length text)) in
+          Printf.printf "done\n  %s\n%!" preview
+        end
       end
     ) valid_tasks)
   end;
@@ -482,9 +517,7 @@ let () =
   (* Feature 4: Fix cycle *)
   let failing_axiom_ids = !outcomes
     |> List.filter (fun (o : Sync_result.task_outcome) ->
-      o.status = "error" && (String.length o.phase >= 10 &&
-        (String.sub o.phase 0 10 = "validation" || String.sub o.phase 0 12 = "satisfaction"
-         || String.sub o.phase 0 14 = "implementation")))
+      (o.status = "error" || o.status = "failed"))
     |> List.map (fun (o : Sync_result.task_outcome) -> o.axiom_id)
     |> List.sort_uniq String.compare
   in
@@ -538,8 +571,8 @@ let () =
       ) (valid_tasks @ satisfy_tasks) in
       let new_failures = ref [] in
       List.iter (fun task ->
-        let (_text, ok) = run task in
-        if not ok then
+        let (text, ok) = run task in
+        if not ok || validation_failed text then
           new_failures := task.Types.axiom_id :: !new_failures
       ) fix_valid_tasks;
       still_failing := List.sort_uniq String.compare !new_failures

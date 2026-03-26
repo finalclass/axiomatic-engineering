@@ -315,9 +315,9 @@ let parse_main_md (content : string) : main_sections =
       current_section := String.lowercase_ascii section
     end else begin
       let buf = match !current_section with
-        | "glossary" -> Some glossary_buf
-        | "labels" -> Some labels_buf
-        | "axioms" -> Some axioms_buf
+        | "glossary" | "s\xc5\x82ownik" -> Some glossary_buf
+        | "labels" | "labele" -> Some labels_buf
+        | "axioms" | "aksjomaty" -> Some axioms_buf
         | _ -> None
       in
       match buf with

@@ -77,6 +77,7 @@ type config = {
   preprompt: string; (** extra system prompt prepended to every AI call *)
   dry_run: bool;
   max_cycles: int;
+  no_semantic: bool;
 }
 
 let default_config = {
@@ -90,6 +91,7 @@ let default_config = {
   preprompt = "";
   dry_run = false;
   max_cycles = 3;
+  no_semantic = false;
 }
 
 (** Resolve model class for a task. Label override takes priority, then phase default. *)

@@ -227,7 +227,54 @@ let format_stream_event (json : Yojson.Safe.t) : string option * string option *
         Some (Printf.sprintf "    %s\n" text)
       | Some "tool_use" ->
         let name = c |> member "name" |> to_string_option |> Option.value ~default:"?" in
-        Some (Printf.sprintf "    → tool: %s\n" name)
+        let hint = match name with
+          | "Bash" | "bash" ->
+            (try
+              let cmd = c |> member "input" |> member "command" |> to_string in
+              let first_line = match String.index_opt cmd '\n' with
+                | Some i -> String.sub cmd 0 i
+                | None -> cmd
+              in
+              let max_len = 80 in
+              let truncated = if String.length first_line > max_len
+                then String.sub first_line 0 max_len ^ "…"
+                else first_line
+              in
+              Printf.sprintf " → %s" truncated
+            with _ -> "")
+          | "Glob" | "glob" ->
+            (try
+              let pattern = c |> member "input" |> member "pattern" |> to_string in
+              Printf.sprintf " → %s" pattern
+            with _ -> "")
+          | "Grep" | "grep" ->
+            (try
+              let pattern = c |> member "input" |> member "pattern" |> to_string in
+              Printf.sprintf " → %s" pattern
+            with _ -> "")
+          | "Read" | "read" ->
+            (try
+              let path = c |> member "input" |> member "file_path" |> to_string in
+              Printf.sprintf " → %s" (Filename.basename path)
+            with _ -> "")
+          | "Edit" | "edit" ->
+            (try
+              let path = c |> member "input" |> member "file_path" |> to_string in
+              Printf.sprintf " → %s" (Filename.basename path)
+            with _ -> "")
+          | "Write" | "write" ->
+            (try
+              let path = c |> member "input" |> member "file_path" |> to_string in
+              Printf.sprintf " → %s" (Filename.basename path)
+            with _ -> "")
+          | "Skill" | "skill" ->
+            (try
+              let skill = c |> member "input" |> member "skill" |> to_string in
+              Printf.sprintf " → %s" skill
+            with _ -> "")
+          | _ -> ""
+        in
+        Some (Printf.sprintf "    → tool: %s%s\n" name hint)
       | _ -> None
     ) content_list in
     if texts <> [] then (Some (String.concat "" texts), None, None)

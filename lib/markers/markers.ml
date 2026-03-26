@@ -77,7 +77,7 @@ let parse_markers (content : string) : (string * int) list =
   List.rev !results
 
 (** Collect all files in a directory recursively, skipping tests/ *)
-let rec collect_files (dir : string) : string list =
+let rec collect_files_recursive (dir : string) : string list =
   if not (Sys.file_exists dir) then []
   else begin
     let entries = Sys.readdir dir |> Array.to_list in
@@ -86,11 +86,26 @@ let rec collect_files (dir : string) : string list =
       if Sys.is_directory path then begin
         (* Skip tests/ directory *)
         if entry = "tests" then []
-        else collect_files path
+        else collect_files_recursive path
       end else
         [path]
     ) entries
   end
+
+(** Collect files using git ls-files to respect .gitignore, with recursive fallback *)
+let collect_files (dir : string) : string list =
+  try
+    let cmd = Printf.sprintf "git ls-files --cached --others --exclude-standard -- %s" (Filename.quote dir) in
+    let ic = Unix.open_process_in cmd in
+    let files = ref [] in
+    (try while true do
+      files := input_line ic :: !files
+    done with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 when !files <> [] -> List.rev !files
+    | _ -> collect_files_recursive dir
+  with _ -> collect_files_recursive dir
 
 (** Build the set of valid axiom IDs from the system.
     Markers anchor to whole axiom files, not sections. *)
