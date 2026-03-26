@@ -23,6 +23,8 @@ let parse_args () : Types.config * bool =
       config := { !config with balanced = v }; parse rest
     | "--fast" :: v :: rest ->
       config := { !config with fast = v }; parse rest
+    | "--preprompt" :: v :: rest ->
+      config := { !config with preprompt = v }; parse rest
     | path :: rest when not (String.length path > 0 && path.[0] = '-') ->
       config := { !config with project_path = path }; parse rest
     | unknown :: _ ->
@@ -35,6 +37,7 @@ let parse_args () : Types.config * bool =
       Printf.eprintf "  --smart MODEL       Model alias for smart class\n";
       Printf.eprintf "  --balanced MODEL    Model alias for balanced class\n";
       Printf.eprintf "  --fast MODEL        Model alias for fast class\n";
+      Printf.eprintf "  --preprompt TEXT    Extra system prompt prepended to every AI call\n";
       exit 1
   in
   parse args;
@@ -43,9 +46,14 @@ let parse_args () : Types.config * bool =
 let section title =
   Printf.printf "\n── %s ──\n%!" title
 
+(** Prepend preprompt to a system prompt if non-empty *)
+let with_preprompt (config : Types.config) (system : string) : string =
+  if config.preprompt = "" then system
+  else config.preprompt ^ "\n\n" ^ system
+
 (** Build system prompt for a task *)
-let system_prompt_of_task ~(code_dir : string) (task : Types.task) : string =
-  Printf.sprintf
+let system_prompt_of_task ~(config : Types.config) ~(code_dir : string) (task : Types.task) : string =
+  with_preprompt config (Printf.sprintf
     "You are an AI agent working on the project. Phase: %s. Label: %s.\n\n\
      Your task is defined by the following axiom specification:\n\n%s\n\n\
      Label description: %s\n\n\
@@ -57,7 +65,7 @@ let system_prompt_of_task ~(code_dir : string) (task : Types.task) : string =
     task.label.name
     task.context
     task.label.description
-    code_dir
+    code_dir)
 
 let prompt_of_task (task : Types.task) : string =
   match task.phase with
@@ -80,7 +88,7 @@ let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?p
     | None -> failwith (Printf.sprintf "Unknown planner model alias: %s" planner_alias)
   in
   let executor = Ai_access.executor_for_alias planner_alias in
-  let system = Printf.sprintf
+  let system = with_preprompt config (Printf.sprintf
     "You are a planning agent. Your job is to analyze the axiom specification and \
      create a detailed implementation plan. Do NOT implement anything — only plan.\n\n\
      Axiom specification:\n\n%s\n\n\
@@ -91,7 +99,7 @@ let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?p
      - What each file should contain\n\
      - How to use @axiom markers for traceability\n\
      - Any dependencies between steps"
-    task.context task.label.name task.label.description code_dir
+    task.context task.label.name task.label.description code_dir)
   in
   let prompt = Printf.sprintf
     "Create an implementation plan for axiom '%s', label [%s]."
@@ -124,7 +132,7 @@ let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ?prov
     | None -> failwith (Printf.sprintf "Unknown model alias: %s" model_alias)
   in
   let executor = Ai_access.executor_for_alias model_alias in
-  let system = system_prompt_of_task ~code_dir task in
+  let system = system_prompt_of_task ~config ~code_dir task in
   let prompt = match plan with
     | Some p ->
       Printf.sprintf "%s\n\nFollow this implementation plan:\n\n%s" (prompt_of_task task) p

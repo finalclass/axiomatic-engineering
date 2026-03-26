@@ -505,10 +505,31 @@ Testy pisane w `well_test` (describe/it/matchers). Dane testowe: `example/` proj
 7. **bash** — `echo hello` → "hello\n"
 8. **bash** — komenda z niezerowym exit code → error z stderr
 
+## Pomysł: Pipeline opisów screenshotów dla satisfaction
+
+**Problem:** Modele multimodalne (vision) są wolne i drogie przy testach satisfaction opartych o screenshoty. Opus rozumuje dobrze, ale jest wolny z obrazami. Gemini Flash / MiMo-V2-Omni są szybkie, ale mogą nie rozumować wystarczająco dobrze o zgodności z aksjomatem.
+
+**Rozwiązanie — dwuetapowy pipeline:**
+
+1. **agent-browser** robi screenshot
+2. **Tani model vision** (Gemini Flash, MiMo) opisuje screenshot jako tekst — proste zadanie: "opisz co widzisz na tym screenshocie"
+3. **Dowolny model** (nawet non-vision jak Haiku) ocenia opis tekstowy vs aksjomat i wystawia rating satisfaction
+
+**Implementacja:**
+- Nowe narzędzie w `tools.ml`: `describe_screenshot` — przyjmuje ścieżkę do screenshota, zwraca opis tekstowy
+- Model vision robi jedno proste zadanie (opis), model judge robi jedno proste zadanie (ocena)
+- Opisy są cachowalne i debugowalne (tekst vs obraz)
+
+**Zalety:**
+- Judge nie musi być multimodalny → tańsze, szybsze modele
+- Opis screenshota to prostsze zadanie niż ocena satisfaction → tani model vision wystarczy
+- Opisy tekstowe są cachowalne i łatwiejsze do debugowania
+- Separacja odpowiedzialności: vision ≠ reasoning
+
 ## Pytania otwarte
 
 1. **Caching sesji agent-browser** — czy agent-browser może trzymać sesję między krokami? (zaloguj raz, reuse w step 6 i 7)
-2. **Streaming** — czy orkiestrator powinien streamować output agentów na stdout w czasie rzeczywistym?
+2. ~~**Streaming** — czy orkiestrator powinien streamować output agentów na stdout w czasie rzeczywistym?~~ ✅ Zrobione (stream-json + --quiet)
 3. **Max iterations** — ile razy powtarzać cykl implement→validate→satisfy zanim się poddać? (propozycja: 3)
 4. **Cost tracking** — logować koszt per krok (input/output tokens × cena modelu)?
 5. **Step 2 sprzeczności** — wykrywanie semantycznych sprzeczności wymaga LLM. Jaki model? (propozycja: Haiku)

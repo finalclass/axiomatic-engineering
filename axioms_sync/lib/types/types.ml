@@ -68,6 +68,7 @@ type config = {
   smart: string;
   balanced: string;
   fast: string;
+  preprompt: string; (** extra system prompt prepended to every AI call *)
 }
 
 let default_config = {
@@ -78,6 +79,7 @@ let default_config = {
   smart = "opus4.6";
   balanced = "sonnet4.6";
   fast = "haiku4.5";
+  preprompt = "";
 }
 
 (** Resolve model class for a task. Label override takes priority, then phase default. *)
