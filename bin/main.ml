@@ -142,7 +142,7 @@ let run_planner ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ~(
 
 (** Run a single task — executor is resolved from model alias by ai_access.
     If plan is provided, it's injected into the implementation prompt. *)
-let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ~(total_cost : float ref) ?provider ?plan (task : Types.task) : (string, string) result =
+let run_task ~(mu : Mutex.t) ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ~(total_cost : float ref) ?provider ?plan (task : Types.task) : (string, string) result =
   let model_alias = Types.model_alias_of_class config task.model_class in
   let model_id = match Ai_access.resolve_alias model_alias with
     | Some (_, id) -> id
@@ -162,7 +162,9 @@ let run_task ~(config : Types.config) ~(code_dir : string) ~(quiet : bool) ~(tot
     ~max_iterations:25 ()
   with
   | Ok (text, cost) ->
+    Mutex.lock mu;
     (match cost with Some c -> total_cost := !total_cost +. c.cost_usd | None -> ());
+    Mutex.unlock mu;
     Ok text
   | Error e -> Error e
 
@@ -397,14 +399,17 @@ let () =
   end;
 
   (* Feature 6: sync-result tracking *)
+  let mu = Mutex.create () in
   let outcomes : Sync_result.task_outcome list ref = ref [] in
   let record_outcome ~(task : Types.task) ~status ~output =
+    Mutex.lock mu;
     outcomes := { Sync_result.axiom_id = task.axiom_id; label = task.label.name;
                   phase = (match task.phase with
                     | Implementation -> "implementation"
                     | Validation -> "validation"
                     | Satisfaction f -> Printf.sprintf "satisfaction(%.1f)" f);
-                  status; output } :: !outcomes
+                  status; output } :: !outcomes;
+    Mutex.unlock mu
   in
 
   let run task =
@@ -415,7 +420,7 @@ let () =
       | Satisfaction f -> Printf.sprintf "sat(%.1f)" f
     in
     Printf.printf "  [%s] %s %s (%s)\n%!" task.Types.label.name task.axiom_id phase_str model_alias;
-    match run_task ~config ~code_dir ~quiet ~total_cost ?provider:!provider task with
+    match run_task ~mu ~config ~code_dir ~quiet ~total_cost ?provider:!provider task with
     | Ok text ->
       record_outcome ~task ~status:"ok" ~output:(String.sub text 0 (min 200 (String.length text)));
       (text, true)
@@ -437,7 +442,7 @@ let () =
     List.iter (fun (task, plan) ->
       let model_alias = Types.model_alias_of_class config task.Types.model_class in
       Printf.printf "  [%s] %s impl (%s)\n%!" task.Types.label.name task.axiom_id model_alias;
-      match run_task ~config ~code_dir ~quiet ~total_cost ?provider:!provider ?plan task with
+      match run_task ~mu ~config ~code_dir ~quiet ~total_cost ?provider:!provider ?plan task with
       | Ok _text ->
         Printf.printf "done\n%!";
         record_outcome ~task ~status:"ok" ~output:"implemented"
@@ -459,17 +464,27 @@ let () =
     | [] -> false
   in
 
-  (* Feature 3: Eio.Fiber.all for validation and satisfaction *)
+  (* Run tasks in parallel using OS threads (run_cli is blocking) *)
+  let run_parallel tasks =
+    let slots = List.map (fun task ->
+      let result = ref ("", false) in
+      let t = Thread.create (fun () -> result := run task) () in
+      (task, t, result)
+    ) tasks in
+    List.map (fun (task, t, result) ->
+      Thread.join t;
+      (task, !result)
+    ) slots
+  in
+
   if valid_tasks <> [] then begin
     section "Validation";
-    Eio_main.run @@ fun _env ->
-    Eio.Fiber.all (List.map (fun task () ->
-      let (text, ok) = run task in
+    let results = run_parallel valid_tasks in
+    List.iter (fun (task, (text, ok)) ->
       if ok then begin
         if validation_failed text then begin
           let preview = String.sub text 0 (min 200 (String.length text)) in
-          Printf.printf "FAILED\n  %s\n%!" preview;
-          (* Override the outcome recorded by run *)
+          Printf.printf "  %s FAILED\n  %s\n%!" task.Types.axiom_id preview;
           outcomes := List.map (fun (o : Sync_result.task_outcome) ->
             if o.axiom_id = task.Types.axiom_id && o.label = task.label.name
                && o.status = "ok" then
@@ -478,36 +493,35 @@ let () =
           ) !outcomes
         end else begin
           let preview = String.sub text 0 (min 200 (String.length text)) in
-          Printf.printf "done\n  %s\n%!" preview
+          Printf.printf "  %s done\n  %s\n%!" task.Types.axiom_id preview
         end
       end
-    ) valid_tasks)
+    ) results
   end;
 
   if satisfy_tasks <> [] then begin
     section "Satisfaction";
     let all_pass = ref true in
-    Eio_main.run @@ fun _env ->
-    Eio.Fiber.all (List.map (fun (task : Types.task) () ->
-      let (text, ok) = run task in
+    let results = run_parallel satisfy_tasks in
+    List.iter (fun (task, (text, ok)) ->
       if ok then begin
         let lines = String.split_on_char '\n' text |> List.filter (fun s -> String.trim s <> "") in
         let last_line = match List.rev lines with l :: _ -> l | [] -> "" in
         (try
           let rating = float_of_string (String.trim last_line) in
-          let threshold = match task.phase with Satisfaction f -> f | _ -> 0.7 in
+          let threshold = match task.Types.phase with Satisfaction f -> f | _ -> 0.7 in
           if rating >= threshold then
-            Printf.printf "PASS (%.1f >= %.1f)\n%!" rating threshold
+            Printf.printf "  %s PASS (%.1f >= %.1f)\n%!" task.axiom_id rating threshold
           else begin
-            Printf.printf "FAIL (%.1f < %.1f)\n%!" rating threshold;
+            Printf.printf "  %s FAIL (%.1f < %.1f)\n%!" task.axiom_id rating threshold;
             all_pass := false
           end
         with Failure _ ->
           let preview = String.sub text 0 (min 200 (String.length text)) in
-          Printf.printf "done (no rating parsed)\n  %s\n%!" preview)
+          Printf.printf "  %s done (no rating parsed)\n  %s\n%!" task.axiom_id preview)
       end else
         all_pass := false
-    ) satisfy_tasks);
+    ) results;
     if not !all_pass then begin
       Printf.eprintf "\nSome satisfaction checks failed.\n";
       exit 1

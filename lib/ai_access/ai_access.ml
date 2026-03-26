@@ -314,7 +314,7 @@ let run_cli
   let oc = Out_channel.open_text prompt_file in
   Out_channel.output_string oc prompt;
   Out_channel.close oc;
-  let cmd = Printf.sprintf "cd %s && unset CLAUDECODE && %s -p \"$(cat %s)\" --system-prompt \"$(cat %s)\" --model %s --output-format stream-json --verbose 2>&1"
+  let cmd = Printf.sprintf "cd %s && unset CLAUDECODE && %s -p \"$(cat %s)\" --system-prompt \"$(cat %s)\" --model %s --dangerously-skip-permissions --output-format stream-json --verbose 2>&1"
     (Filename.quote cwd) command (Filename.quote prompt_file) (Filename.quote sys_file) (Filename.quote model) in
   let ic = Unix.open_process_in cmd in
   let result_text = ref "" in
