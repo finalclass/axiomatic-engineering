@@ -22,6 +22,7 @@ dev:
 
 install: build
 	mkdir -p $(PREFIX)/bin
+	rm -f $(PREFIX)/bin/axioms-sync
 	cp _build/default/bin/main.exe $(PREFIX)/bin/axioms-sync
 
 uninstall:
