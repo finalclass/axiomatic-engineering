@@ -7,6 +7,7 @@ module Consistency = Consistency
 module Planner = Planner
 module Markers = Markers
 module Ai_access = Ai_access
+module Config = Config
 module Anthropic = Anthropic
 module Tools = Tools
 module Sync_result = Sync_result

@@ -23,6 +23,6 @@
 (source
  (fetch
   (url
-   git+ssh://git@github.com/finalclass/well.git#221918cbfef01c054da9c7b98ceaa778f7a6fec8)))
+   git+ssh://git@github.com/finalclass/well.git#cbaeaa6a1da6f36472bbdb3bc0f056a65c1b5cfc)))
 
 (dev)
