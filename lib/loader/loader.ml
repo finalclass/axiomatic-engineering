@@ -34,6 +34,22 @@ let parse_model_class (s : string) : model_class option =
   | "$fast" -> Some Fast
   | _ -> None
 
+(** Parse a hidden phase like "-implementation", "-validation", "-satisfaction" *)
+let parse_hidden_phase (s : string) : phase option =
+  if s = "-implementation"
+  then Some Implementation
+  else if s = "-validation"
+  then Some Validation
+  else if String.length s > 14 && String.sub s 0 14 = "-satisfaction("
+  then
+    let inner = String.sub s 14 (String.length s - 15) in
+    match float_of_string_opt inner with
+    | Some f -> Some (Satisfaction f)
+    | None -> None
+  else if s = "-satisfaction"
+  then Some (Satisfaction 0.7)
+  else None
+
 (** Parse a phase like "@implementation", "@validation", "@satisfaction(0.8)" *)
 let parse_phase (s : string) : phase option =
   if s = "@implementation"
@@ -96,6 +112,7 @@ let parse_label_heading ?(glossary : glossary_entry list = []) (heading : string
         let rest = String.sub heading (j + 1) (String.length heading - j - 1) in
         let tokens = tokenize rest in
         let phases = ref [] in
+        let hidden_phases = ref [] in
         let markers = ref [] in
         let model_class_ref = ref None in
         let glossary_keys = ref [] in
@@ -108,12 +125,15 @@ let parse_label_heading ?(glossary : glossary_entry list = []) (heading : string
                 | Some k -> glossary_keys := k :: !glossary_keys
                 | None -> () )
             | None -> (
+              match parse_hidden_phase tok with
+              | Some hp -> hidden_phases := hp :: !hidden_phases
+              | None -> (
               match parse_context_marker tok with
               | Some m -> markers := m :: !markers
               | None -> (
                 match parse_model_class tok with
                 | Some mc -> model_class_ref := Some mc
-                | None -> () ) ) )
+                | None -> () ) ) ) )
           tokens ;
         (* Resolve glossary keys for satisfaction thresholds *)
         let phases = List.rev !phases in
@@ -151,6 +171,7 @@ let parse_label_heading ?(glossary : glossary_entry list = []) (heading : string
         Some
           { name
           ; phases
+          ; hidden_phases= List.rev !hidden_phases
           ; markers= List.rev !markers
           ; model_class= !model_class_ref
           ; description= "" (* filled later from content below heading *) } )
@@ -270,6 +291,7 @@ let parse_axiom_file ~(id : string) (content : string) : axiom =
   let current_content = Buffer.create 256 in
   let in_header_area = ref true in
   let refs = extract_links content in
+  let inline_labels = ref [] in
 
   let flush_section () =
     match !current_heading with
@@ -304,23 +326,41 @@ let parse_axiom_file ~(id : string) (content : string) : axiom =
         in_header_area := true
       end
       else begin
-        (* Check for label lines *)
+        (* Check for label lines anywhere in the file *)
         let trimmed = String.trim line in
-        if trimmed <> "" && trimmed.[0] = '[' && !in_header_area
-        then begin
+        if trimmed <> "" && trimmed.[0] = '[' then begin
+          (* Check if this is inline (has text after labels) or standalone *)
           let labels = parse_inline_labels trimmed in
           let label_names = List.map fst labels in
-          if !current_heading = None && !name <> ""
-          then file_labels := !file_labels @ label_names
-          else current_labels := !current_labels @ label_names
-        end
-        else begin
-          if trimmed <> "" then in_header_area := false ;
-          if !current_heading <> None
-          then begin
-            Buffer.add_string current_content line ;
-            Buffer.add_char current_content '\n'
+          (* Find where labels end — if there's text after, it's inline *)
+          let rec find_end i =
+            if i >= String.length trimmed then false
+            else match trimmed.[i] with
+            | ']' ->
+                let after = String.trim (String.sub trimmed (i + 1) (String.length trimmed - i - 1)) in
+                if after <> "" && after.[0] = '[' then find_end (i + 1)
+                else after <> "" && String.trim after <> ""
+            | _ -> find_end (i + 1)
+          in
+          let has_content_after = find_end 0 in
+          if not has_content_after then begin
+            (* Standalone label — applies to file/section scope *)
+            if !current_heading = None && !name <> ""
+            then file_labels := !file_labels @ label_names
+            else current_labels := !current_labels @ label_names
           end
+          else begin
+            (* Inline label with content — collect for task generation *)
+            inline_labels := !inline_labels @ label_names
+          end
+          (* Inline label with content — filter_content handles it,
+             do NOT add to file/section labels *)
+        end ;
+        if trimmed <> "" then in_header_area := false ;
+        if !current_heading <> None
+        then begin
+          Buffer.add_string current_content line ;
+          Buffer.add_char current_content '\n'
         end
       end )
     lines ;
@@ -330,6 +370,7 @@ let parse_axiom_file ~(id : string) (content : string) : axiom =
   ; name= !name
   ; sections= List.rev !sections
   ; labels= !file_labels
+  ; inline_labels= List.sort_uniq String.compare !inline_labels
   ; refs
   ; raw_content= content }
 
@@ -528,3 +569,15 @@ let load ~(axioms_dir : string) : (axiom_system, string) result =
         ; label_defs
         ; axioms= List.rev !axioms
         ; global_labels }
+
+let load_exn axioms_dir : axiom_system =
+  let axioms_dir = Eio.Path.native_exn axioms_dir in
+  match load ~axioms_dir with
+  | Ok s ->
+      Fmt.pr
+        "Loaded: %s (%d axioms, %d labels)\n%!@."
+        s.name
+        (List.length s.axioms)
+        (List.length s.label_defs) ;
+      s
+  | Error msg -> failwith (Fmt.str "Error loading axioms %s@." msg)

@@ -7,9 +7,18 @@ let section title =
      ────────────────────────────────────────────────────────────────────────────────────────────────────\n"
     title
 
+let ensure_sth_to_implement ~impl_tasks f =
+  match impl_tasks with
+  | [] ->
+      Fmt.pr "\nNo tasks to execute.\n%!@." ;
+      ()
+  | _ -> f ()
+
 let run ~(config : Types.config) =
+  Mirage_crypto_rng_unix.use_default () ;
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun _sw ->
+  Ai_access.set_net (Eio.Stdenv.net env) ;
   let fs = Eio.Stdenv.fs env in
   let project_path = Eio.Path.(fs / config.project_path) in
   let axioms_dir = Eio.Path.(project_path / "axioms") in
@@ -23,33 +32,14 @@ let run ~(config : Types.config) =
 
   section "Planning tasks" ;
 
-  let _impl_tasks = Planner.implementation_tasks system changes in
+  let impl_tasks = Planner.implementation_tasks system changes in
+  let _valid_tasks = Planner.validation_tasks system changes in
+  let _satisfy_tasks = Planner.satisfaction_tasks system changes in
 
-  Fmt.pr "IMPL TASKS: %s@." ([%show: Types.task list] _impl_tasks) ;
+  ensure_sth_to_implement ~impl_tasks @@ fun () ->
+  Consistency.check_semantic_exn ~system ;
 
   ()
-
-(* section "Planning tasks" ; *)
-(* let impl_tasks = Planner.implementation_tasks system change_list in *)
-(* let valid_tasks = Planner.validation_tasks system change_list in *)
-(* let satisfy_tasks = Planner.satisfaction_tasks system change_list in *)
-(* Printf.printf "Implementation: %d tasks\n%!" (List.length impl_tasks) ; *)
-(* Printf.printf "Validation:     %d tasks\n%!" (List.length valid_tasks) ; *)
-(* Printf.printf "Satisfaction:   %d tasks\n%!" (List.length satisfy_tasks) ; *)
-
-(* failwith "DONE" |> ignore ; *)
-
-(* if impl_tasks = [] && valid_tasks = [] && satisfy_tasks = [] *)
-(* then begin *)
-(*   Printf.printf "\nNo tasks to execute.\n%!" ; *)
-(*   Snapshot.save_freeze ~project_path ; *)
-(*   exit 0 *)
-(* end ; *)
-
-(* let all_tasks = impl_tasks @ valid_tasks @ satisfy_tasks in *)
-(* let provider = setup_http_provider ~config ~tasks:all_tasks in *)
-
-(* let total_cost = ref 0.0 in *)
 
 (* run_semantic_check *)
 (*   ~config *)

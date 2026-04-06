@@ -24,8 +24,8 @@
   eio
   eio_main
   yojson
-  sqlite3
-  ppx_deriving_yojson
-  tls-eio
+   sqlite3
+   ppx_deriving_yojson
+   tls-eio
   ca-certs
   mirage-crypto-rng))

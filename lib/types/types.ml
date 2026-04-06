@@ -1,13 +1,18 @@
 (** Core types for axioms-sync *)
 
 type ai_provider =
-  | Cli
   | OpenRouter
 
 type cost_info =
   { cost_usd: float
   ; input_tokens: int
   ; output_tokens: int }
+
+(** Tool definition for AI agents *)
+type tool_def =
+  { name: string
+  ; description: string
+  ; input_schema: Yojson.Safe.t }
 
 type phase =
   | Implementation
@@ -31,7 +36,8 @@ type model_class =
 
 type label_def =
   { name: string
-  ; phases: phase list
+  ; phases: phase list  (** when tasks are generated — @implementation, @validation, @satisfaction *)
+  ; hidden_phases: phase list  (** when content is hidden — -implementation, -validation, -satisfaction *)
   ; markers: context_marker list
   ; model_class: model_class option  (** None = use default for phase *)
   ; description: string }
@@ -48,7 +54,8 @@ type axiom =
   { id: string  (** e.g. "patient-client/booking.md" *)
   ; name: string
   ; sections: section list
-  ; labels: string list  (** file-level labels after cascade *)
+  ; labels: string list  (** file-level/section-level labels after cascade *)
+  ; inline_labels: string list  (** labels found inline in content lines, e.g. "[scenario] text..." *)
   ; refs: string list  (** links to other axiom files *)
   ; raw_content: string }
 [@@deriving show]
@@ -119,7 +126,7 @@ let default_config =
   ; no_semantic= false
   ; axiom= None
   ; timings= false
-  ; provider= Cli
+  ; provider= OpenRouter
   ; api_key= None
   ; model_overrides= []
   ; search_api_key= None }

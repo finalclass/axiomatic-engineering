@@ -30,53 +30,134 @@ let is_satisfaction_only_label (system : axiom_system) (label_name : string) : b
 let find_label_def (system : axiom_system) (name : string) : label_def option =
   List.find_opt (fun (ld : label_def) -> ld.name = name) system.label_defs
 
-(** Filter axiom content: remove sections tagged with labels not in allowed set.
-    For implementation: strip @validation-only and @satisfaction-only blocks. *)
-let filter_content ~(allowed_labels : string list) (axiom : axiom) : string =
+(** Check if any of the given labels hides content for the current phase.
+    A label hides content if the current phase is in its hidden_phases. *)
+let is_hidden ~(system : axiom_system) ~(phase : phase) (labels : string list) : bool =
+  if labels = [] then false (* no labels → never hidden *)
+  else List.exists (fun ln ->
+    match find_label_def system ln with
+    | Some ld -> List.mem phase ld.hidden_phases
+    | None -> false (* unknown label → not hidden *)
+  ) labels
+
+(** Extract label names from parsed labels, ignoring thresholds *)
+let label_names (parsed : (string * float option) list) : string list =
+  List.map fst parsed
+
+(** Parse a line that may start with inline labels: "[label] text" or just "[label]".
+    Returns (labels_found, text_after_labels).
+    If labels are not at the start, returns all labels found but keeps original text. *)
+let parse_line_labels (line : string) : (string * float option) list * string =
+  let trimmed = String.trim line in
+  if trimmed = "" then ([], line)
+  else if trimmed.[0] = '[' then begin
+    (* Labels at the start — find where they end *)
+    let labels = Loader.parse_inline_labels trimmed in
+    let rec find_end i =
+      if i >= String.length trimmed then ("", labels)
+      else match trimmed.[i] with
+      | ']' ->
+          let after = String.trim (String.sub trimmed (i + 1) (String.length trimmed - i - 1)) in
+          if after <> "" && after.[0] = '['
+          then find_end (i + 1) (* more labels *)
+          else (after, labels)
+      | _ -> find_end (i + 1)
+    in
+    let content_after, labels = find_end 0 in
+    let content = if content_after = "" then line else content_after in
+    (labels, content)
+  end
+  else begin
+    (* Labels elsewhere — just extract them, keep original text *)
+    let labels = Loader.parse_inline_labels trimmed in
+    (labels, line)
+  end
+
+(** Filter axiom content with support for section-level and inline labels.
+
+    Label scope rules:
+    - Label on its own line (e.g. "[scenario]") → context switch: applies to all
+      content below until a blank line or new label.
+    - Label inline with text (e.g. "[scenario] Naglowek jest...") → applies only
+      to that single line/paragraph.
+    - Label in ## heading (e.g. "## Naglowek [scenario]") → applies to the whole
+      section until the next ##.
+    - Blank line → resets context to section-level labels.
+
+    Visibility: content is hidden if any active label has the current phase
+    in its hidden_phases list (e.g. `-implementation`). *)
+let filter_content ~(system : axiom_system) ~(phase : phase) (axiom : axiom) : string =
   let buf = Buffer.create (String.length axiom.raw_content) in
   let lines = String.split_on_char '\n' axiom.raw_content in
-  let in_section = ref false in
-  let section_visible = ref true in
-  let header_done = ref false in
+
+  (* Section-level labels: set when we see ## heading *)
+  let section_labels = ref ([] : string list) in
+  (* Context labels: set by standalone label lines, reset by blank lines *)
+  let context_labels = ref ([] : string list) in
 
   List.iter (fun line ->
+    let trimmed = String.trim line in
+
+    (* Check if this is a ## heading *)
     if String.length line >= 3 && String.sub line 0 3 = "## " then begin
-      in_section := true;
-      section_visible := true; (* default visible, check labels below *)
-      header_done := false;
-      Buffer.add_string buf line;
-      Buffer.add_char buf '\n'
-    end
-    else if !in_section && not !header_done then begin
-      (* Check for label line right after section heading *)
-      let trimmed = String.trim line in
-      if trimmed <> "" && trimmed.[0] = '[' then begin
-        let labels = Loader.parse_inline_labels trimmed in
-        let label_names = List.map fst labels in
-        (* If any label is NOT in allowed_labels, hide the section *)
-        let has_forbidden = List.exists (fun ln ->
-          not (List.mem ln allowed_labels) &&
-          ln <> "" (* ignore empty *)
-        ) label_names in
-        if has_forbidden && label_names <> [] then
-          section_visible := false;
-        header_done := true;
-        if !section_visible then begin
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n'
-        end
-      end else begin
-        header_done := true;
-        if !section_visible then begin
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n'
-        end
-      end
-    end
-    else begin
-      if !section_visible || not !in_section then begin
+      let heading_text = String.sub line 3 (String.length line - 3) in
+      let labels, _ = parse_line_labels heading_text in
+      let ln = label_names labels in
+      section_labels := ln;
+      context_labels := [];
+      (* Emit heading only if not hidden *)
+      if not (is_hidden ~system ~phase ln) then begin
         Buffer.add_string buf line;
         Buffer.add_char buf '\n'
+      end
+    end
+
+    (* Check if this is a # heading (axiom title) — reset context *)
+    else if String.length trimmed >= 2 && trimmed.[0] = '#' && trimmed.[1] = ' ' then begin
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n';
+      section_labels := [];
+      context_labels := []
+    end
+
+    (* Blank line → reset context labels *)
+    else if trimmed = "" then begin
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n';
+      context_labels := []
+    end
+
+    else begin
+      (* Parse labels from this line *)
+      let labels, content = parse_line_labels line in
+      let ln = label_names labels in
+
+      if labels <> [] then begin
+        (* Determine if this is a standalone label line or inline *)
+        if content = "" || String.trim content = "" then begin
+          (* Standalone label line — context switch *)
+          let hidden = is_hidden ~system ~phase ln in
+          if not hidden then begin
+            Buffer.add_string buf line;
+            Buffer.add_char buf '\n'
+          end;
+          context_labels := ln
+        end
+        else begin
+          (* Inline label — applies only to this line *)
+          if not (is_hidden ~system ~phase ln) then begin
+            Buffer.add_string buf line;
+            Buffer.add_char buf '\n'
+          end
+        end
+      end
+      else begin
+        (* No labels on this line — check section and context *)
+        let effective_labels = !context_labels @ !section_labels in
+        if not (is_hidden ~system ~phase effective_labels) then begin
+          Buffer.add_string buf line;
+          Buffer.add_char buf '\n'
+        end
       end
     end
   ) lines;
@@ -112,22 +193,18 @@ let implementation_tasks (system : axiom_system) (changes : (axiom * axiom_chang
     let section_impl_labels = List.concat_map (fun (s : section) ->
       List.filter (fun ln -> List.mem ln impl_labels) s.labels
     ) axiom.sections in
-    let all_labels = axiom_impl_labels @ section_impl_labels in
+    (* Also check inline labels *)
+    let inline_impl_labels = List.filter (fun ln ->
+      List.mem ln impl_labels
+    ) axiom.inline_labels in
+    let all_labels = axiom_impl_labels @ section_impl_labels @ inline_impl_labels in
     let all_labels = List.sort_uniq String.compare all_labels in
     (* Generate one task per axiom with implementation labels *)
     if all_labels <> [] then begin
-      let allowed = List.filter_map (fun (ld : label_def) ->
-        if List.exists (fun p -> match p with Implementation -> true | _ -> false) ld.phases then
-          Some ld.name
-        else if not (List.exists (fun p ->
-          match p with Validation | Satisfaction _ -> true | _ -> false) ld.phases) then
-          Some ld.name (* labels without any phase — keep visible *)
-        else None
-      ) system.label_defs in
-      let context = filter_content ~allowed_labels:allowed axiom in
+      let context = filter_content ~system ~phase:Implementation axiom in
       List.map (fun label_name ->
         let ld = match find_label_def system label_name with
-          | Some ld -> ld | None -> { name = label_name; phases = []; markers = []; model_class = None; description = "" }
+          | Some ld -> ld | None -> { name = label_name; phases = []; hidden_phases = []; markers = []; model_class = None; description = "" }
         in
         {
           axiom_id = axiom.id;
@@ -151,8 +228,10 @@ let validation_tasks (system : axiom_system) (changes : (axiom * axiom_change) l
   ) system.label_defs in
   List.concat_map (fun (axiom : axiom) ->
     let axiom_all_labels = axiom.labels @
-      List.concat_map (fun (s : section) -> s.labels) axiom.sections in
+      List.concat_map (fun (s : section) -> s.labels) axiom.sections @
+      axiom.inline_labels in
     let axiom_all_labels = List.sort_uniq String.compare axiom_all_labels in
+    let context = filter_content ~system ~phase:Validation axiom in
     List.filter_map (fun (ld : label_def) ->
       if List.mem ld.name axiom_all_labels then
         Some {
@@ -160,7 +239,7 @@ let validation_tasks (system : axiom_system) (changes : (axiom * axiom_change) l
           section_anchor = None;
           label = ld;
           phase = Validation;
-          context = axiom.raw_content;
+          context;
           model_class = resolve_model_class ?label_class:ld.model_class Validation;
         }
       else None
@@ -177,7 +256,8 @@ let satisfaction_tasks (system : axiom_system) (changes : (axiom * axiom_change)
   ) system.label_defs in
   List.concat_map (fun (axiom : axiom) ->
     let axiom_all_labels = axiom.labels @
-      List.concat_map (fun (s : section) -> s.labels) axiom.sections in
+      List.concat_map (fun (s : section) -> s.labels) axiom.sections @
+      axiom.inline_labels in
     let axiom_all_labels = List.sort_uniq String.compare axiom_all_labels in
     List.filter_map (fun (ld : label_def) ->
       if List.mem ld.name axiom_all_labels then begin
@@ -185,12 +265,13 @@ let satisfaction_tasks (system : axiom_system) (changes : (axiom * axiom_change)
           match p with Satisfaction f -> Some f | _ -> None
         ) ld.phases in
         let threshold = match threshold with Some f -> f | None -> 0.7 in
+        let context = filter_content ~system ~phase:(Satisfaction threshold) axiom in
         Some {
           axiom_id = axiom.id;
           section_anchor = None;
           label = ld;
           phase = Satisfaction threshold;
-          context = axiom.raw_content;
+          context;
           model_class = resolve_model_class ?label_class:ld.model_class (Satisfaction threshold);
         }
       end else None

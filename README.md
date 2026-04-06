@@ -220,7 +220,7 @@ The sync operates in two modes:
 
 Axiom files are loaded by following the link chain from `main.md` — only files reachable through links are included in the sync.
 
-The sync process follows an **orchestrator pattern**. The OCaml binary handles all deterministic work (loading, parsing, snapshot, diff, consistency checks, change list generation, marker verification) and then delegates AI work to isolated agents via the Anthropic API:
+The sync process follows an **orchestrator pattern**. The OCaml binary handles all deterministic work (loading, parsing, snapshot, diff, consistency checks, change list generation, marker verification) and then delegates AI work to isolated agents via the OpenRouter API:
 
 1. **Planning** — a planner model analyzes axioms and creates implementation plans (read-only access to code)
 2. **Implementation** — implementing agent writes code following the plan, receiving axioms filtered to `@implementation` labels only. Blocks carrying `@validation`-only or `@satisfaction`-only labels are stripped from its context.

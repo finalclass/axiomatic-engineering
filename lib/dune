@@ -2,4 +2,5 @@
 
 (library
  (name axioms_sync)
- (libraries well.core eio yojson))
+ (libraries well.core eio yojson)
+ (preprocess (pps ppx_deriving.show)))

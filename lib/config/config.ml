@@ -1,6 +1,6 @@
 (** Config — hierarchical configuration loading *)
 
-let _cached : (Types.config * bool) option ref = ref None
+let _cached : Types.config option ref = ref None
 
 let merge_toml (sources : Otoml.t list) : Otoml.t =
   List.fold_left
@@ -41,55 +41,46 @@ let get_string_opt toml key = Well.Toml.get_string toml key
 
 let provider_of_string = function
   | "openrouter" -> Types.OpenRouter
-  | "cli" -> Types.Cli
-  | _ -> Types.Cli
+  | _ -> Types.OpenRouter
 
-let load_impl ?(project_path = ".") () : Types.config * bool =
+let load_impl ?(project_path = ".") () : Types.config =
   let global = Sources.load_global () in
   let project = Sources.load_project project_path in
   let cli = Sources.parse_cli_args (Array.to_list Sys.argv |> List.tl) in
   let env = Sources.load_env () in
   let merged = merge_toml [global; project; cli; env] in
   let quiet = get_bool merged ["quiet"] false in
-  let config : Types.config =
-    { project_path= get_string merged ["project_path"] "."
-    ; mode=
-        ( match get_string merged ["mode"] "diff" with
-        | "full" -> `Full
-        | _ -> `Diff )
-    ; planner= get_string merged ["planner"] "deepseek-v3.2"
-    ; implementer= get_string merged ["implementer"] "m2.7"
-    ; smart= get_string merged ["smart"] "m2.7"
-    ; balanced= get_string merged ["balanced"] "m2.7"
-    ; fast= get_string merged ["fast"] "k2.5"
-    ; vision= get_string merged ["vision"] "llama-vision"
-    ; preprompt= get_string merged ["preprompt"] ""
-    ; max_cycles= get_int merged ["max_cycles"] 3
-    ; no_semantic= get_bool merged ["no_semantic"] false
-    ; axiom= get_string_opt merged ["axiom"]
-    ; timings= get_bool merged ["timings"] false
-    ; provider=
-        ( match get_string_opt merged ["provider"] with
-        | Some p -> provider_of_string p
-        | None ->
-            let has_api_key =
-              match get_string_opt merged ["api_key"] with
-              | Some _ -> true
-              | None -> (
-                match Sys.getenv_opt "AS_API_KEY" with
-                | Some _ -> true
-                | None -> false )
-            in
-            if has_api_key then Types.OpenRouter else Types.Cli )
-    ; api_key= get_string_opt merged ["api_key"]
-    ; model_overrides= []
-    ; search_api_key= get_string_opt merged ["search_api_key"] }
-  in
-  (config, quiet)
+  { project_path= get_string merged ["project_path"] "."
+  ; mode=
+      ( match get_string merged ["mode"] "diff" with
+      | "full" -> `Full
+      | _ -> (
+        match get_string_opt merged ["axiom"] with
+        | Some axiom -> `Specific [axiom]
+        | None -> `Diff ) )
+  ; planner= get_string merged ["planner"] "deepseek-v3.2"
+  ; implementer= get_string merged ["implementer"] "m2.7"
+  ; smart= get_string merged ["smart"] "m2.7"
+  ; balanced= get_string merged ["balanced"] "m2.7"
+  ; fast= get_string merged ["fast"] "k2.5"
+  ; vision= get_string merged ["vision"] "llama-vision"
+  ; preprompt= get_string merged ["preprompt"] ""
+  ; max_cycles= get_int merged ["max_cycles"] 3
+  ; no_semantic= get_bool merged ["no_semantic"] false
+  ; axiom= get_string_opt merged ["axiom"]
+  ; timings= get_bool merged ["timings"] false
+  ; provider=
+      ( match get_string_opt merged ["provider"] with
+      | Some p -> provider_of_string p
+      | None -> Types.OpenRouter )
+  ; api_key= get_string_opt merged ["api_key"]
+  ; model_overrides= []
+  ; quiet
+  ; search_api_key= get_string_opt merged ["search_api_key"] }
 
-let load ?(project_path = ".") () : Types.config * bool =
+let load ?(project_path = ".") () : Types.config =
   match !_cached with
-  | Some (c, q) -> (c, q)
+  | Some c -> c
   | None ->
       let result = load_impl ~project_path () in
       _cached := Some result ;

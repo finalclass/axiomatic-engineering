@@ -1,7 +1,5 @@
 (** Tool definitions and execution for AI agents *)
 
-open Ai_access
-
 (** Read a file's content *)
 let read_file ~(path : string) : string =
   if Sys.file_exists path then begin
@@ -99,7 +97,7 @@ let object_schema ~required (properties : (string * Yojson.Safe.t) list) : Yojso
   ]
 
 (** Tool definitions *)
-let read_file_def : tool_def = {
+let read_file_def : Types.tool_def = {
   name = "read_file";
   description = "Read the contents of a file at the given path";
   input_schema = object_schema ~required:["path"] [
@@ -107,7 +105,7 @@ let read_file_def : tool_def = {
   ];
 }
 
-let write_file_def : tool_def = {
+let write_file_def : Types.tool_def = {
   name = "write_file";
   description = "Write content to a file, creating it if it doesn't exist";
   input_schema = object_schema ~required:["path"; "content"] [
@@ -116,7 +114,7 @@ let write_file_def : tool_def = {
   ];
 }
 
-let edit_file_def : tool_def = {
+let edit_file_def : Types.tool_def = {
   name = "edit_file";
   description = "Replace old_string with new_string in a file (exact match)";
   input_schema = object_schema ~required:["path"; "old_string"; "new_string"] [
@@ -126,7 +124,7 @@ let edit_file_def : tool_def = {
   ];
 }
 
-let list_files_def : tool_def = {
+let list_files_def : Types.tool_def = {
   name = "list_files";
   description = "List files matching a glob pattern";
   input_schema = object_schema ~required:["glob"] [
@@ -134,7 +132,7 @@ let list_files_def : tool_def = {
   ];
 }
 
-let bash_def : tool_def = {
+let bash_def : Types.tool_def = {
   name = "bash";
   description = "Run a bash command and return stdout+stderr";
   input_schema = object_schema ~required:["command"] [
@@ -147,7 +145,7 @@ let bash_def : tool_def = {
     +browser -> bash (for agent-browser)
     +api -> bash (restricted to curl)
     default -> bash *)
-let tool_defs_for_markers (markers : Types.context_marker list) : tool_def list =
+let tool_defs_for_markers (markers : Types.context_marker list) : Types.tool_def list =
   let has_code = List.mem Types.Code markers in
   let has_browser = List.mem Types.Browser markers in
   let has_api = List.mem Types.Api markers in
