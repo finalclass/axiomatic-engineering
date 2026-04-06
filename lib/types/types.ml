@@ -13,18 +13,21 @@ type phase =
   | Implementation
   | Validation
   | Satisfaction of float  (** threshold 0.0–1.0 *)
+[@@deriving show]
 
 type context_marker =
   | Code
   | Browser
   | Api
   | Axioms
+[@@deriving show]
 
 type model_class =
   | Smart
   | Balanced
   | Fast
   | Vision
+[@@deriving show]
 
 type label_def =
   { name: string
@@ -32,12 +35,14 @@ type label_def =
   ; markers: context_marker list
   ; model_class: model_class option  (** None = use default for phase *)
   ; description: string }
+[@@deriving show]
 
 type section =
   { heading: string
   ; anchor: string
   ; content: string
   ; labels: string list  (** label names after cascade *) }
+[@@deriving show]
 
 type axiom =
   { id: string  (** e.g. "patient-client/booking.md" *)
@@ -46,6 +51,7 @@ type axiom =
   ; labels: string list  (** file-level labels after cascade *)
   ; refs: string list  (** links to other axiom files *)
   ; raw_content: string }
+[@@deriving show]
 
 type glossary_entry =
   { term: string
@@ -61,7 +67,8 @@ type axiom_system =
 type axiom_change =
   | Added
   | Deleted
-  | Modified of string list  (** changed section anchors *)
+  | Modified of string list
+[@@deriving show]
 
 type system = axiom_system
 
@@ -75,13 +82,15 @@ type task =
   ; context: string  (** filtered axiom content for this agent *)
   ; model_class: model_class  (** resolved: label override or phase default *)
   }
+[@@deriving show]
 
 type config =
   { project_path: string
-  ; mode: [`Diff | `Full]
+  ; mode: [`Diff | `Full | `Specific of string list]
   ; planner: string  (** model alias for planning *)
   ; implementer: string  (** model alias e.g. "opus4.6" *)
   ; smart: string
+  ; quiet: bool
   ; balanced: string
   ; fast: string
   ; vision: string  (** model alias for vision class *)
@@ -105,6 +114,7 @@ let default_config =
   ; fast= "k2.5"
   ; vision= "k2.5"
   ; preprompt= ""
+  ; quiet= false
   ; max_cycles= 3
   ; no_semantic= false
   ; axiom= None

@@ -83,20 +83,18 @@ let filter_content ~(allowed_labels : string list) (axiom : axiom) : string =
   Buffer.contents buf |> String.trim
 
 (** Get axioms that are in scope based on changes *)
-let axioms_in_scope (system : axiom_system) (changes : (string * axiom_change) list) : axiom list =
+let axioms_in_scope (system : axiom_system) (changes : (axiom * axiom_change) list) : axiom list =
   if changes = [] then
     (* Full sync: all axioms *)
     system.axioms
   else
-    List.filter (fun (a : axiom) ->
-      List.exists (fun (id, change) ->
-        id = a.id && (match change with Deleted -> false | _ -> true)
-      ) changes
-    ) system.axioms
+    List.filter_map (fun (a, change) ->
+      match change with Deleted -> None | _ -> Some a
+    ) changes
 
 (** Generate implementation tasks (Step 5 context).
     Strips @validation-only and @satisfaction-only blocks. *)
-let implementation_tasks (system : axiom_system) (changes : (string * axiom_change) list)
+let implementation_tasks (system : axiom_system) (changes : (axiom * axiom_change) list)
   : task list =
   let in_scope = axioms_in_scope system changes in
   (* Collect implementation-visible label names *)
@@ -145,7 +143,7 @@ let implementation_tasks (system : axiom_system) (changes : (string * axiom_chan
 
 (** Generate validation tasks (Step 6 context).
     One task per label with @validation phase. *)
-let validation_tasks (system : axiom_system) (changes : (string * axiom_change) list)
+let validation_tasks (system : axiom_system) (changes : (axiom * axiom_change) list)
   : task list =
   let in_scope = axioms_in_scope system changes in
   let validation_labels = List.filter (fun (ld : label_def) ->
@@ -171,7 +169,7 @@ let validation_tasks (system : axiom_system) (changes : (string * axiom_change) 
 
 (** Generate satisfaction tasks (Step 7 context).
     One task per @satisfaction scenario. *)
-let satisfaction_tasks (system : axiom_system) (changes : (string * axiom_change) list)
+let satisfaction_tasks (system : axiom_system) (changes : (axiom * axiom_change) list)
   : task list =
   let in_scope = axioms_in_scope system changes in
   let satisfaction_labels = List.filter (fun (ld : label_def) ->
