@@ -37,17 +37,12 @@ let run ~(config : Types.config) =
   let _satisfy_tasks = Planner.satisfaction_tasks system changes in
 
   ensure_sth_to_implement ~impl_tasks @@ fun () ->
+  section "Semantic check" ;
   Consistency.check_semantic_exn ~system ;
 
-  ()
+  section "Implementation phase" ;
 
-(* run_semantic_check *)
-(*   ~config *)
-(*   ~changes *)
-(*   ~system *)
-(*   ~project_path *)
-(*   ~total_cost *)
-(*   ~provider ; *)
+  ()
 
 (* let outcomes, record_outcome = create_outcome_recorder () in *)
 
