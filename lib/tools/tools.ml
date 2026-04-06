@@ -1,5 +1,19 @@
 (** Tool definitions and execution for AI agents *)
 
+(** Todo list state *)
+let todos : (string * string) list ref = ref []
+
+let todo_write ~(todos_list : (string * string) list) : string =
+  todos := todos_list ;
+  "Todos updated"
+
+let todo_read () : string =
+  match !todos with
+  | [] -> "No todos"
+  | _ ->
+      List.map (fun (t, s) -> Printf.sprintf "- [%s] %s" s t) !todos
+      |> String.concat "\n"
+
 (** Read a file's content *)
 let read_file ~(path : string) : string =
   if Sys.file_exists path then begin
@@ -56,8 +70,7 @@ let edit_file ~(path : string) ~(old_string : string) ~(new_string : string) : (
       end
   end
 
-(** List files matching a simple glob pattern in a directory.
-    Supports * wildcard in the filename part. *)
+(** List files matching a glob pattern in a directory. *)
 let list_files ~(glob : string) ~(base_dir : string) : string list =
   let cmd = Printf.sprintf "find %s -name %s -type f 2>/dev/null | sort"
     (Filename.quote base_dir) (Filename.quote glob) in
@@ -68,6 +81,27 @@ let list_files ~(glob : string) ~(base_dir : string) : string list =
   done with End_of_file -> ());
   let _ = Unix.close_process_in ic in
   List.rev !results
+
+(** List files matching a glob pattern. Wraps list_files. *)
+let glob_search ~(pattern : string) ~(base_dir : string) : string list =
+  list_files ~glob:pattern ~base_dir
+
+(** Search file contents with a regex pattern using grep -rn. *)
+let grep_search ~(pattern : string) ~(base_dir : string) : string =
+  let cmd = Printf.sprintf "grep -rn --include='*.ml' --include='*.mli' --include='*.md' --include='*.txt' --include='*.json' --include='*.dune' -e '%s' %s 2>/dev/null"
+    (String.escaped pattern) (Filename.quote base_dir)
+  in
+  let ic = Unix.open_process_in cmd in
+  let buf = Buffer.create 1024 in
+  (try while true do Buffer.add_char buf (input_char ic) done with End_of_file -> ()) ;
+  let status = Unix.close_process_in ic in
+  let output = Buffer.contents buf in
+  match status with
+  | Unix.WEXITED 0 -> output
+  | Unix.WEXITED 1 -> ""  (* grep returns 1 when no match *)
+  | Unix.WEXITED code -> Printf.sprintf "Error (exit code %d)" code
+  | Unix.WSIGNALED s -> Printf.sprintf "Killed by signal %d" s
+  | Unix.WSTOPPED s -> Printf.sprintf "Stopped by signal %d" s
 
 (** Run a bash command, return stdout+stderr *)
 let bash ~(command : string) : (string, string * int) result =
@@ -124,11 +158,45 @@ let edit_file_def : Types.tool_def = {
   ];
 }
 
-let list_files_def : Types.tool_def = {
-  name = "list_files";
-  description = "List files matching a glob pattern";
-  input_schema = object_schema ~required:["glob"] [
-    ("glob", string_prop ~description:"Glob pattern (e.g. '*.md', '*.html')");
+let glob_search_def : Types.tool_def = {
+  name = "glob_search";
+  description = "Find files by glob pattern";
+  input_schema = object_schema ~required:["pattern"; "base_dir"] [
+    ("pattern", string_prop ~description:"Glob pattern (e.g. '*.ml', '**/*.md')");
+    ("base_dir", string_prop ~description:"Base directory to search in");
+  ];
+}
+
+let grep_search_def : Types.tool_def = {
+  name = "grep_search";
+  description = "Search file contents with a regex pattern";
+  input_schema = object_schema ~required:["pattern"; "base_dir"] [
+    ("pattern", string_prop ~description:"Regex pattern to search for");
+    ("base_dir", string_prop ~description:"Base directory to search in");
+  ];
+}
+
+let todo_write_def : Types.tool_def = {
+  name = "TodoWrite";
+  description = "Update the structured task list for the current session";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("todos", `Assoc [
+        ("type", `String "array");
+        ("description", `String "The updated todo list");
+        ("items",
+         `Assoc [
+           ("type", `String "object");
+           ("properties", `Assoc [
+             ("task", `Assoc [("type", `String "string"); ("description", `String "Task description")]);
+             ("status", `Assoc [("type", `String "string"); ("description", `String "pending/in_progress/completed")]);
+           ]);
+           ("required", `List [`String "task"; `String "status"]);
+         ]);
+      ]);
+    ]);
+    ("required", `List [`String "todos"]);
   ];
 }
 
@@ -140,24 +208,16 @@ let bash_def : Types.tool_def = {
   ];
 }
 
-(** Tool definitions filtered by context markers.
-    +code -> read_file, write_file, edit_file, list_files
-    +browser -> bash (for agent-browser)
-    +api -> bash (restricted to curl)
-    default -> bash *)
-let tool_defs_for_markers (markers : Types.context_marker list) : Types.tool_def list =
-  let has_code = List.mem Types.Code markers in
-  let has_browser = List.mem Types.Browser markers in
-  let has_api = List.mem Types.Api markers in
-  let tools = ref [] in
-  if has_code then
-    tools := read_file_def :: write_file_def :: edit_file_def :: list_files_def :: !tools;
-  if has_browser || has_api then
-    tools := bash_def :: !tools;
-  (* Default: if no specific markers, provide bash *)
-  if not has_code && not has_browser && not has_api then
-    tools := bash_def :: !tools;
-  List.rev !tools
+(** All tool definitions available to agents *)
+let all_tool_defs : Types.tool_def list =
+  [ read_file_def; write_file_def; edit_file_def
+  ; glob_search_def; grep_search_def; bash_def
+  ; todo_write_def ]
+
+(** Convert Types.tool_def list to Ai_access tool tuple format *)
+let to_ai_tools (defs : Types.tool_def list) :
+    (string * string * Yojson.Safe.t) list =
+  List.map (fun (d : Types.tool_def) -> (d.name, d.description, d.input_schema)) defs
 
 (** Extract a string field from JSON input *)
 let json_string (input : Yojson.Safe.t) (field : string) : string =
@@ -166,34 +226,66 @@ let json_string (input : Yojson.Safe.t) (field : string) : string =
 
 (** Execute a tool call by name *)
 let execute ~(base_dir : string) (name : string) (input : Yojson.Safe.t) : string =
+  let open Yojson.Safe.Util in
   match name with
   | "read_file" ->
-    let path = json_string input "path" in
-    let full_path = if Filename.is_relative path then Filename.concat base_dir path else path in
-    read_file ~path:full_path
+      let path = json_string input "path" in
+      let full_path = if Filename.is_relative path then Filename.concat base_dir path else path in
+      read_file ~path:full_path
   | "write_file" ->
-    let path = json_string input "path" in
-    let content = json_string input "content" in
-    let full_path = if Filename.is_relative path then Filename.concat base_dir path else path in
-    write_file ~path:full_path ~content;
-    "File written successfully"
+      let path = json_string input "path" in
+      let content = json_string input "content" in
+      let full_path = if Filename.is_relative path then Filename.concat base_dir path else path in
+      write_file ~path:full_path ~content;
+      "File written successfully"
   | "edit_file" ->
-    let path = json_string input "path" in
-    let old_string = json_string input "old_string" in
-    let new_string = json_string input "new_string" in
-    let full_path = if Filename.is_relative path then Filename.concat base_dir path else path in
-    (match edit_file ~path:full_path ~old_string ~new_string with
-     | Ok () -> "File edited successfully"
-     | Error msg -> Printf.sprintf "Error: %s" msg)
-  | "list_files" ->
-    let glob = json_string input "glob" in
-    let files = list_files ~glob ~base_dir in
-    String.concat "\n" files
+      let path = json_string input "path" in
+      let old_string = json_string input "old_string" in
+      let new_string = json_string input "new_string" in
+      let full_path = if Filename.is_relative path then Filename.concat base_dir path else path in
+      (match edit_file ~path:full_path ~old_string ~new_string with
+       | Ok () -> "File edited successfully"
+       | Error msg -> Printf.sprintf "Error: %s" msg)
+  | "glob_search" ->
+      let pattern = json_string input "pattern" in
+      let base_dir' =
+        match input |> member "base_dir" |> to_string_option with
+        | Some d -> d
+        | None -> base_dir
+      in
+      String.concat "\n" (glob_search ~pattern ~base_dir:base_dir')
+  | "grep_search" ->
+      let pattern = json_string input "pattern" in
+      let base_dir' =
+        match input |> member "base_dir" |> to_string_option with
+        | Some d -> d
+        | None -> base_dir
+      in
+      grep_search ~pattern ~base_dir:base_dir'
   | "bash" ->
-    let command = json_string input "command" in
-    (match bash ~command with
-     | Ok output -> output
-     | Error (output, code) ->
-       Printf.sprintf "Exit code %d:\n%s" code output)
+      let command = json_string input "command" in
+      (match bash ~command with
+       | Ok output -> output
+       | Error (output, code) ->
+         Printf.sprintf "Exit code %d:\n%s" code output)
+  | "TodoWrite" ->
+      let todos_arr = input |> member "todos" |> to_list in
+      let todos_list =
+        List.map
+          (fun item ->
+            let task =
+              match item |> member "task" |> member "description" |> to_string_option with
+              | Some d -> d
+              | None -> ""
+            in
+            let status =
+              match item |> member "status" |> to_string_option with
+              | Some s -> s
+              | None -> "pending"
+            in
+            (task, status))
+          todos_arr
+      in
+      todo_write ~todos_list
   | _ ->
-    Printf.sprintf "Unknown tool: %s" name
+      Printf.sprintf "Unknown tool: %s" name

@@ -1,4 +1,4 @@
-(** AI Access — OpenRouter API *)
+(** AI Access — OpenRouter API with SSE streaming *)
 
 let net : Obj.t option ref = ref None
 
@@ -10,115 +10,151 @@ open struct
 let get_net () : _ Eio.Net.t =
   match !net with
   | Some n -> (Obj.obj n : _ Eio.Net.t)
-  | None -> failwith "Ai_access.set_net was not called — call it from within Eio_main.run"
+  | None -> failwith "Ai_access.set_net was not called"
+
+let format_tool_use_hint name input =
+  match name with
+  | "bash" -> (
+      try
+        let cmd = Yojson.Safe.Util.(input |> member "command" |> to_string) in
+        let first_line =
+          match String.index_opt cmd '\n' with
+          | Some i -> String.sub cmd 0 i
+          | None -> cmd
+        in
+        let max_len = 70 in
+        if String.length first_line > max_len
+        then String.sub first_line 0 max_len ^ "…"
+        else first_line
+      with _ -> "" )
+  | "read_file" -> (
+      try Yojson.Safe.Util.(input |> member "path" |> to_string) |> Filename.basename
+      with _ -> "" )
+  | "write_file" | "edit_file" -> (
+      try Yojson.Safe.Util.(input |> member "path" |> to_string) |> Filename.basename
+      with _ -> "" )
+  | "glob_search" -> (
+      try Yojson.Safe.Util.(input |> member "pattern" |> to_string) with _ -> "" )
+  | "grep_search" -> (
+      try Yojson.Safe.Util.(input |> member "pattern" |> to_string) with _ -> "" )
+  | "TodoWrite" -> "(updating todos)"
+  | _ -> ""
+
+let build_messages () =
+  let msg_to_json (role, content_blocks) =
+    `Assoc
+      [ ("role", `String role)
+      ; ( "content"
+        , `List
+            (List.map
+               (function
+                 | `Text s ->
+                     `Assoc [ ("type", `String "text"); ("text", `String s) ]
+                 | `Tool_use (id, name, input) ->
+                     `Assoc
+                       [ ("type", `String "tool_use")
+                       ; ("id", `String id)
+                       ; ("name", `String name)
+                       ; ("input", input) ]
+                 | `Tool_result (tool_use_id, content, is_error) ->
+                     `Assoc
+                       ( [ ("type", `String "tool_result")
+                         ; ("tool_use_id", `String tool_use_id)
+                         ; ("content", `String content) ]
+                       @ if is_error then [ ("is_error", `Bool true) ] else [] ) )
+               content_blocks)) ]
+  in
+  List.map msg_to_json
+
+let tool_to_json (name, description, input_schema) =
+  `Assoc
+    [ ("name", `String name)
+    ; ("description", `String description)
+    ; ("input_schema", input_schema) ]
+
+let estimate_cost model inp outp =
+  let ipm, opm =
+    match model with
+    | m
+      when String.length m >= 11 && String.sub m 0 11 = "claude-opus" ->
+        (15.0, 75.0)
+    | m
+      when String.length m >= 13 && String.sub m 0 13 = "claude-sonnet" ->
+        (3.0, 15.0)
+    | m
+      when String.length m >= 12 && String.sub m 0 12 = "claude-haiku" ->
+        (0.25, 1.25)
+    | _ -> (3.0, 15.0)
+  in
+  (float_of_int inp *. ipm /. 1_000_000.0)
+  +. (float_of_int outp *. opm /. 1_000_000.0)
+
+(** Parse SSE data lines from a chunk. Returns list of JSON strings. *)
+let parse_sse_events chunk =
+  let events = ref [] in
+  let lines = String.split_on_char '\n' chunk in
+  List.iter
+    (fun line ->
+      let line = String.trim line in
+      if String.starts_with ~prefix:"data: " line
+      then
+        let data = String.sub line 6 (String.length line - 6) in
+        events := data :: !events )
+    lines ;
+  List.rev !events
+
+(** Parse a single SSE event JSON. Returns (text_deltas, tool_uses, is_done). *)
+let parse_sse_event data =
+  if data = "[DONE]" then ([], [], true)
+  else
+    try
+      let json = Yojson.Safe.from_string data in
+      let open Yojson.Safe.Util in
+      (* OpenRouter SSE format: choices[0].delta.content / tool_calls *)
+      let delta =
+        match json |> member "choices" |> to_list with
+        | c :: _ -> c |> member "delta"
+        | [] -> `Null
+      in
+      let text =
+        match delta |> member "content" |> to_string_option with
+        | Some "" | None -> ""
+        | Some s -> s
+      in
+      let tool_uses =
+        match delta |> member "tool_calls" with
+        | `List tl ->
+            List.map
+              (fun t ->
+                let id = t |> member "index" |> to_int in
+                let func = t |> member "function" in
+                let name = func |> member "name" |> to_string in
+                let input_str = func |> member "arguments" |> to_string in
+                let input =
+                  try Yojson.Safe.from_string input_str with _ -> `Assoc []
+                in
+                (id, name, input))
+              tl
+        | _ -> []
+      in
+      let finish_reason =
+        json
+        |> member "choices"
+        |> to_list
+        |> List.hd
+        |> fun c -> c |> member "finish_reason" |> to_string_option
+      in
+      ( [text]
+      , tool_uses
+      , match finish_reason with
+        | Some "stop" | Some "tool_calls" -> true
+        | _ -> false )
+    with _ -> ([], [], false)
 
 let send_openrouter ~api_key ~model ~system ~prompt ~tools ~execute_tool ~max_iterations =
-  let net = get_net () in
-  let build_messages () =
-    let msg_to_json (role, content_blocks) =
-      `Assoc
-        [ ("role", `String role)
-        ; ( "content"
-          , `List
-              (List.map
-                 (function
-                   | `Text s ->
-                       `Assoc [ ("type", `String "text"); ("text", `String s) ]
-                   | `Tool_use (id, name, input) ->
-                       `Assoc
-                         [ ("type", `String "tool_use")
-                         ; ("id", `String id)
-                         ; ("name", `String name)
-                         ; ("input", input) ]
-                   | `Tool_result (tool_use_id, content, is_error) ->
-                       `Assoc
-                         ( [ ("type", `String "tool_result")
-                           ; ("tool_use_id", `String tool_use_id)
-                           ; ("content", `String content) ]
-                         @ if is_error then [ ("is_error", `Bool true) ]
-                           else [] ) )
-                 content_blocks)) ]
-    in
-    List.map msg_to_json
-  in
-
-  let tool_to_json (name, description, input_schema) =
-    `Assoc
-      [ ("name", `String name)
-      ; ("description", `String description)
-      ; ("input_schema", input_schema) ]
-  in
-
-  let parse_response json_str =
-    let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let content_list = json |> member "content" |> to_list in
-    let parse_content c =
-      match c |> member "type" |> to_string_option with
-      | Some "text" ->
-          Some (`Text (c |> member "text" |> to_string))
-      | Some "tool_use" ->
-          Some
-            (`Tool_use
-               ( c |> member "id" |> to_string
-               , c |> member "name" |> to_string
-               , c |> member "input" ))
-      | _ -> None
-    in
-    let content = List.filter_map parse_content content_list in
-    let stop_reason =
-      json
-      |> member "stop_reason"
-      |> to_string_option
-      |> Option.value ~default:"end_turn"
-    in
-    let usage = json |> member "usage" in
-    let input_tokens =
-      usage |> member "input_tokens" |> to_int_option |> Option.value ~default:0
-    in
-    let output_tokens =
-      usage
-      |> member "output_tokens"
-      |> to_int_option
-      |> Option.value ~default:0
-    in
-    (content, stop_reason, input_tokens, output_tokens)
-  in
-
-  let extract_text content =
-    List.filter_map (function `Text s -> Some s | _ -> None) content
-    |> String.concat "\n"
-  in
-
-  let extract_tool_uses content =
-    List.filter_map
-      (function `Tool_use (id, name, input) -> Some (id, name, input) | _ -> None)
-      content
-  in
-
-  let estimate_cost model inp outp =
-    let ipm, opm =
-      match model with
-      | m
-        when String.length m >= 11 && String.sub m 0 11 = "claude-opus" ->
-          (15.0, 75.0)
-      | m
-        when String.length m >= 13 && String.sub m 0 13 = "claude-sonnet" ->
-          (3.0, 15.0)
-      | m
-        when String.length m >= 12 && String.sub m 0 12 = "claude-haiku" ->
-          (0.25, 1.25)
-      | _ -> (3.0, 15.0)
-    in
-    (float_of_int inp *. ipm /. 1_000_000.0)
-    +. (float_of_int outp *. opm /. 1_000_000.0)
-  in
-
   let rec loop messages iteration total_inp total_outp =
     if iteration >= max_iterations
-    then
-      Error
-        (Printf.sprintf "Agent exceeded max iterations (%d)" max_iterations)
+    then Error (Printf.sprintf "Agent exceeded max iterations (%d)" max_iterations)
     else
       let body =
         `Assoc
@@ -126,53 +162,130 @@ let send_openrouter ~api_key ~model ~system ~prompt ~tools ~execute_tool ~max_it
           ; ("system", `String system)
           ; ("messages", `List (build_messages () messages))
           ; ("tools", `List (List.map tool_to_json tools))
-          ; ("max_tokens", `Int 8192) ]
+          ; ("max_tokens", `Int 8192)
+          ; ("stream", `Bool true) ]
       in
       let body_str = Yojson.Safe.to_string body in
-      let resp =
-        Well.fetch_with_net ~net
+
+      let accumulated_text = Buffer.create 1024 in
+      let tool_use_map = Hashtbl.create 10 in
+      let stream_done = ref false in
+      let final_usage = ref (0, 0) in
+
+      let on_data chunk =
+        let events = parse_sse_events chunk in
+        List.iter
+          (fun data ->
+            if !stream_done then ()
+            else
+              let text_deltas, tool_calls, is_done = parse_sse_event data in
+              if is_done then stream_done := true ;
+              (* Accumulate text *)
+              List.iter
+                (fun t ->
+                  if t <> ""
+                  then (
+                    Buffer.add_string accumulated_text t ;
+                    print_string t ;
+                    flush stdout ))
+                text_deltas ;
+              (* Accumulate tool_calls (streamed incrementally) *)
+              List.iter
+                (fun (idx, name, input) ->
+                  let (_id, existing_name, existing_input) =
+                    if Hashtbl.mem tool_use_map idx
+                    then Hashtbl.find tool_use_map idx
+                    else (idx, "", `Assoc [])
+                  in
+                  let merged_name = if name <> "" then name else existing_name in
+                  let merged_input =
+                    if input <> `Assoc [] then input else existing_input
+                  in
+                  Hashtbl.replace tool_use_map idx (idx, merged_name, merged_input))
+                tool_calls ;
+              (* Try to extract usage from event *)
+              ( try
+                  let json = Yojson.Safe.from_string data in
+                  let open Yojson.Safe.Util in
+                  let usage = json |> member "usage" in
+                  let inp =
+                    usage |> member "input_tokens" |> to_int_option |> Option.value ~default:0
+                  in
+                  let outp =
+                    usage |> member "output_tokens" |> to_int_option |> Option.value ~default:0
+                  in
+                  if inp > 0 || outp > 0 then final_usage := (inp, outp)
+                with _ -> () ))
+          events
+      in
+
+      let _status_headers =
+        Well.fetch_stream_with_net
+          ~net:(get_net ())
           ~headers:
             [ ("Authorization", "Bearer " ^ api_key)
             ; ("Content-Type", "application/json") ]
           ~body:body_str
+          ~on_data
           "https://openrouter.ai/api/v1/chat/completions"
       in
-      let content, stop_reason, inp, outp =
-        parse_response resp.Well.body
+      print_newline () ;
+      flush stdout ;
+
+      let text_content = Buffer.contents accumulated_text in
+
+      (* Collect tool uses from the map *)
+      let tool_uses =
+        Hashtbl.fold
+          (fun _idx (id, name, input) acc -> (string_of_int id, name, input) :: acc)
+          tool_use_map []
       in
+
+      let inp, outp = !final_usage in
       let total_inp = total_inp + inp in
       let total_outp = total_outp + outp in
-      match stop_reason with
-      | "tool_use" ->
-          let assistant_msg =
-            ("assistant", content)
-          in
-          let messages_with_assistant = messages @ [ assistant_msg ] in
-          let tool_uses = extract_tool_uses content in
-          let results =
-            List.map
-              (fun (id, name, input) ->
-                let result_str =
-                  try execute_tool name input with
-                  | exn ->
-                      Printf.sprintf "Error: %s" (Printexc.to_string exn)
-                in
-                `Tool_result (id, result_str, false))
-              tool_uses
-          in
-          let messages_with_results =
-            messages_with_assistant @ [ ("user", results) ]
-          in
-          loop messages_with_results (iteration + 1) total_inp total_outp
-      | _ ->
-          let text = extract_text content in
-          let cost = estimate_cost model total_inp total_outp in
-          Ok
-            ( text
-            , Some
-                { Types.cost_usd= cost
-                ; input_tokens= total_inp
-                ; output_tokens= total_outp } )
+
+      if tool_uses <> []
+      then begin
+        (* Print tool call info *)
+        List.iter
+          (fun (_id, name, input) ->
+            let hint = format_tool_use_hint name input in
+            if hint <> ""
+            then Printf.printf "    → %s %s\n%!" name hint
+            else Printf.printf "    → %s\n%!" name )
+          tool_uses ;
+
+        let assistant_content =
+          if text_content <> ""
+          then `Text text_content :: List.map (fun (id, name, input) -> `Tool_use (id, name, input)) tool_uses
+          else List.map (fun (id, name, input) -> `Tool_use (id, name, input)) tool_uses
+        in
+        let messages_with_assistant = messages @ [ ("assistant", assistant_content) ] in
+        let results =
+          List.map
+            (fun (id, name, input) ->
+              let result_str =
+                try execute_tool name input with
+                | exn -> Printf.sprintf "Error: %s" (Printexc.to_string exn)
+              in
+              Printf.printf "    ← %s\n%!" (String.trim result_str) ;
+              `Tool_result (id, result_str, false))
+            tool_uses
+        in
+        let messages_with_results =
+          messages_with_assistant @ [ ("user", results) ]
+        in
+        loop messages_with_results (iteration + 1) total_inp total_outp
+      end
+      else
+        let cost = estimate_cost model total_inp total_outp in
+        Ok
+          ( text_content
+          , Some
+              { Types.cost_usd= cost
+              ; input_tokens= total_inp
+              ; output_tokens= total_outp } )
   in
 
   loop [ ("user", [ `Text prompt ]) ] 0 0 0
@@ -182,7 +295,11 @@ end
 let prompt
     ~(system_prompt : string)
     ~(user_prompt : string)
-    ~(model : string) : string =
+    ~(model : string)
+    ?(tools : (string * string * Yojson.Safe.t) list = [])
+    ?(execute_tool : string -> Yojson.Safe.t -> string = fun _ _ -> "")
+    ?(max_iterations : int = 25)
+    () : string =
   let api_key =
     match Sys.getenv_opt "OPENROUTER_API_KEY" with
     | Some k -> k
@@ -194,9 +311,9 @@ let prompt
       ~model
       ~system:system_prompt
       ~prompt:user_prompt
-      ~tools:[]
-      ~execute_tool:(fun _ _ -> "No tools available")
-      ~max_iterations:1
+      ~tools
+      ~execute_tool
+      ~max_iterations
   with
   | Ok (text, _) -> text
   | Error msg -> failwith msg
