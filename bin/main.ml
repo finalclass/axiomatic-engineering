@@ -332,10 +332,8 @@ let run_consistency_check (system : Types.system) : unit =
       exit 1
 
 (** Compute changes based on mode (full or diff) *)
-let compute_changes
-    ~(config : Types.config)
-    ~(project_path : string)
-    ~(system : Types.system) : (string * Types.change) list option =
+let compute_changes ~(config : Types.config) ~(project_path : string) ~system:_
+    : (string * Types.change) list option =
   match config.mode with
   | `Full ->
       Printf.printf "Full sync mode — all axioms in scope.\n%!" ;
@@ -380,7 +378,7 @@ let validate_markers (code_dir : string) (system : Types.system) : unit =
 
 (** Setup HTTP provider if needed *)
 let setup_http_provider ~(config : Types.config) ~(tasks : Types.task list) :
-    Anthropic.provider option =
+    Ai_access.provider option =
   if needs_http config tasks
   then begin
     Eio_main.run @@ fun env ->
@@ -398,7 +396,7 @@ let run_semantic_check
     ~(system : Types.system)
     ~(project_path : string)
     ~(total_cost : float ref)
-    ~(provider : Anthropic.provider option) : unit =
+    ~(provider : Ai_access.provider option) : unit =
   let semantic_axioms =
     match changes with
     | Some ch ->
@@ -497,7 +495,7 @@ let run_implementation_phase
     ~(code_dir : string)
     ~(quiet : bool)
     ~(total_cost : float ref)
-    ~(provider : Anthropic.provider option)
+    ~(provider : Ai_access.provider option)
     ~(record_outcome : Types.task -> string -> string -> unit)
     ~(impl_tasks : Types.task list) : unit =
   if impl_tasks <> []
@@ -540,7 +538,7 @@ let run_validation_phase
     ~(code_dir : string)
     ~(quiet : bool)
     ~(total_cost : float ref)
-    ~(provider : Anthropic.provider option)
+    ~(provider : Ai_access.provider option)
     ~(record_outcome : Types.task -> string -> string -> unit)
     ~(outcomes : Sync_result.task_outcome list ref)
     ~(valid_tasks : Types.task list) : unit =
@@ -593,7 +591,7 @@ let run_validation_phase
           if validation_failed text
           then begin
             let preview = String.sub text 0 (min 200 (String.length text)) in
-            Printf.printf "  %s FAILED\n  %s\n%!" task.axiom_id preview ;
+            Printf.printf "  %s FAILED\n  %s\n%!" task.Types.axiom_id preview ;
             outcomes :=
               List.map
                 (fun (o : Sync_result.task_outcome) ->
@@ -622,7 +620,7 @@ let run_satisfaction_phase
     ~(code_dir : string)
     ~(quiet : bool)
     ~(total_cost : float ref)
-    ~(provider : Anthropic.provider option)
+    ~(provider : Ai_access.provider option)
     ~(satisfy_tasks : Types.task list) : unit =
   if satisfy_tasks <> []
   then begin
@@ -677,8 +675,8 @@ let run_satisfaction_phase
           try
             let rating = float_of_string (String.trim last_line) in
             let threshold =
-              match task.phase with
-              | Satisfaction f -> f
+              match task.Types.phase with
+              | Types.Satisfaction f -> f
               | _ -> 0.7
             in
             if rating >= threshold
@@ -719,7 +717,7 @@ let run_fix_cycle
     ~(code_dir : string)
     ~(quiet : bool)
     ~(total_cost : float ref)
-    ~(provider : Anthropic.provider option)
+    ~(provider : Ai_access.provider option)
     ~(record_outcome : Types.task -> string -> string -> unit)
     ~(outcomes : Sync_result.task_outcome list ref)
     ~(impl_tasks : Types.task list)
@@ -760,7 +758,10 @@ let run_fix_cycle
       in
       List.iter
         (fun task ->
-          Printf.printf "  fix [%s] %s ... %!" task.label.name task.axiom_id ;
+          Printf.printf
+            "  fix [%s] %s ... %!"
+            task.Types.label.name
+            task.Types.axiom_id ;
           let fix_prompt =
             Printf.sprintf
               "%s\n\n\
@@ -898,6 +899,8 @@ let () =
   Printf.printf "Implementation: %d tasks\n%!" (List.length impl_tasks) ;
   Printf.printf "Validation:     %d tasks\n%!" (List.length valid_tasks) ;
   Printf.printf "Satisfaction:   %d tasks\n%!" (List.length satisfy_tasks) ;
+
+  failwith "DONE" |> ignore ;
 
   if impl_tasks = [] && valid_tasks = [] && satisfy_tasks = []
   then begin

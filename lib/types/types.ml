@@ -63,6 +63,10 @@ type axiom_change =
   | Deleted
   | Modified of string list  (** changed section anchors *)
 
+type system = axiom_system
+
+type change = axiom_change
+
 type task =
   { axiom_id: string
   ; section_anchor: string option
