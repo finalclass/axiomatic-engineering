@@ -4,6 +4,19 @@ let net : Obj.t option ref = ref None
 
 let set_net (n : 'a) : unit = net := Some (Obj.repr n)
 
+type toolset =
+  | No_tools
+  | All_tools
+
+type content_block =
+  [ `Text of string
+  | `Tool_use of string * string * Yojson.Safe.t
+  | `Tool_result of string * string * bool ]
+
+type message = string * content_block list
+
+let sessions : (string, message list) Hashtbl.t = Hashtbl.create 16
+
 open struct
 [@@@warning "-32"]
 
@@ -151,7 +164,14 @@ let parse_sse_event data =
         | _ -> false )
     with _ -> ([], [], false)
 
-let send_openrouter ~api_key ~model ~system ~prompt ~tools ~execute_tool ~max_iterations =
+let send_openrouter
+    ~api_key
+    ~model
+    ~system
+    ~(messages : message list)
+    ~tools
+    ~execute_tool
+    ~max_iterations =
   let rec loop messages iteration total_inp total_outp =
     if iteration >= max_iterations
     then Error (Printf.sprintf "Agent exceeded max iterations (%d)" max_iterations)
@@ -280,15 +300,21 @@ let send_openrouter ~api_key ~model ~system ~prompt ~tools ~execute_tool ~max_it
       end
       else
         let cost = estimate_cost model total_inp total_outp in
+        let final_messages =
+          if text_content <> ""
+          then messages @ [ ("assistant", [ `Text text_content ]) ]
+          else messages
+        in
         Ok
           ( text_content
+          , final_messages
           , Some
               { Types.cost_usd= cost
               ; input_tokens= total_inp
               ; output_tokens= total_outp } )
   in
 
-  loop [ ("user", [ `Text prompt ]) ] 0 0 0
+  loop messages 0 0 0
 
 end
 
@@ -296,10 +322,36 @@ let prompt
     ~(system_prompt : string)
     ~(user_prompt : string)
     ~(model : string)
-    ?(tools : (string * string * Yojson.Safe.t) list = [])
-    ?(execute_tool : string -> Yojson.Safe.t -> string = fun _ _ -> "")
+    ?session_id
+    ?(toolset : toolset = All_tools)
+    ?(tool_base_dir : string = Sys.getcwd ())
+    ?tools
+    ?execute_tool
     ?(max_iterations : int = 25)
     () : string =
+  let tools, execute_tool =
+    match (tools, execute_tool) with
+    | Some tools, Some execute_tool -> (tools, execute_tool)
+    | Some tools, None -> (tools, (fun _ _ -> ""))
+    | None, Some execute_tool -> ([], execute_tool)
+    | None, None -> (
+      match toolset with
+      | No_tools -> ([], (fun _ _ -> ""))
+      | All_tools ->
+          ( Tools.to_ai_tools Tools.all_tool_defs
+          , Tools.execute ~base_dir:tool_base_dir ) )
+  in
+  let messages =
+    match session_id with
+    | None -> [ ("user", [ `Text user_prompt ]) ]
+    | Some session_id ->
+        let previous_messages =
+          match Hashtbl.find_opt sessions session_id with
+          | Some messages -> messages
+          | None -> []
+        in
+        previous_messages @ [ ("user", [ `Text user_prompt ]) ]
+  in
   let api_key =
     match Sys.getenv_opt "OPENROUTER_API_KEY" with
     | Some k -> k
@@ -310,10 +362,14 @@ let prompt
       ~api_key
       ~model
       ~system:system_prompt
-      ~prompt:user_prompt
+      ~messages
       ~tools
       ~execute_tool
       ~max_iterations
   with
-  | Ok (text, _) -> text
+  | Ok (text, final_messages, _) ->
+      Option.iter
+        (fun session_id -> Hashtbl.replace sessions session_id final_messages)
+        session_id ;
+      text
   | Error msg -> failwith msg
