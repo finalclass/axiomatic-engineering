@@ -19,6 +19,8 @@
  (synopsis "A well web application")
  (depends
   (ocaml (>= 5.4))
+  (ppx_pipebang
+   (>= v0.17.0))
   mlx
   well
   eio

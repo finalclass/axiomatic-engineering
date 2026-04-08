@@ -1,4 +1,8 @@
-(** axioms-sync CLI — orchestrates axiom synchronization *)
+let () =
+  let config = Axioms_sync.Config.load () in
+  Axioms_sync.run ~config
+
+(* (\** axioms-sync CLI — orchestrates axiom synchronization *\) *)
 
 (* open Axioms_sync *)
 
@@ -865,7 +869,107 @@
 (*   Snapshot.save_freeze ~project_path ; *)
 (*   Printf.printf "Sync complete. Total cost: $%.4f\n%!" total_cost *)
 
-(** Main entry point *)
-let () =
-  let config = Axioms_sync.Config.load () in
-  Axioms_sync.run ~config
+(* (\** Main entry point *\) *)
+(* let () = *)
+(*   let config, quiet = Config.load () in *)
+(*   let config, quiet = Config.load () in *)
+(*   let project_path = config.project_path in *)
+(*   let axioms_dir = Filename.concat project_path "axioms" in *)
+(*   let code_dir = Filename.concat project_path "code" in *)
+
+(*   validate_directories project_path axioms_dir ; *)
+
+(*   section "Loading axioms" ; *)
+(*   let system = load_system axioms_dir in *)
+
+(*   section "Consistency checks" ; *)
+(*   run_consistency_check system ; *)
+
+(*   section "Snapshot & diff" ; *)
+(*   let changes = compute_changes ~config ~project_path ~system in *)
+(*   let change_list = *)
+(*     match changes with *)
+(*     | None -> *)
+(*         List.map (fun (a : Types.axiom) -> (a.id, Types.Added)) system.axioms *)
+(*     | Some c -> c *)
+(*   in *)
+
+(*   section "Marker validation" ; *)
+(*   validate_markers code_dir system ; *)
+
+(*   section "Planning tasks" ; *)
+(*   let impl_tasks = Planner.implementation_tasks system change_list in *)
+(*   let valid_tasks = Planner.validation_tasks system change_list in *)
+(*   let satisfy_tasks = Planner.satisfaction_tasks system change_list in *)
+(*   Printf.printf "Implementation: %d tasks\n%!" (List.length impl_tasks) ; *)
+(*   Printf.printf "Validation:     %d tasks\n%!" (List.length valid_tasks) ; *)
+(*   Printf.printf "Satisfaction:   %d tasks\n%!" (List.length satisfy_tasks) ; *)
+
+(*   failwith "DONE" *)
+
+(*   if impl_tasks = [] && valid_tasks = [] && satisfy_tasks = [] *)
+(*   then begin *)
+(*     Printf.printf "\nNo tasks to execute.\n%!" ; *)
+(*     Snapshot.save_freeze ~project_path ; *)
+(*     exit 0 *)
+(*   end ; *)
+
+(*   let all_tasks = impl_tasks @ valid_tasks @ satisfy_tasks in *)
+(*   let provider = setup_http_provider ~config ~tasks:all_tasks in *)
+
+(*   let total_cost = ref 0.0 in *)
+
+(*   run_semantic_check *)
+(*     ~config *)
+(*     ~changes *)
+(*     ~system *)
+(*     ~project_path *)
+(*     ~total_cost *)
+(*     ~provider ; *)
+
+(*   let outcomes, record_outcome = create_outcome_recorder () in *)
+
+(*   run_implementation_phase *)
+(*     ~config *)
+(*     ~code_dir *)
+(*     ~quiet *)
+(*     ~total_cost *)
+(*     ~provider *)
+(*     ~record_outcome *)
+(*     ~impl_tasks ; *)
+
+(*   run_validation_phase *)
+(*     ~config *)
+(*     ~code_dir *)
+(*     ~quiet *)
+(*     ~total_cost *)
+(*     ~provider *)
+(*     ~record_outcome *)
+(*     ~outcomes *)
+(*     ~valid_tasks ; *)
+
+(*   run_satisfaction_phase *)
+(*     ~config *)
+(*     ~code_dir *)
+(*     ~quiet *)
+(*     ~total_cost *)
+(*     ~provider *)
+(*     ~satisfy_tasks ; *)
+
+(*   run_fix_cycle *)
+(*     ~config *)
+(*     ~code_dir *)
+(*     ~quiet *)
+(*     ~total_cost *)
+(*     ~provider *)
+(*     ~record_outcome *)
+(*     ~outcomes *)
+(*     ~impl_tasks *)
+(*     ~valid_tasks *)
+(*     ~satisfy_tasks ; *)
+
+(*   save_results *)
+(*     ~project_path *)
+(*     ~total_cost:!total_cost *)
+(*     ~outcomes:(List.rev !outcomes) *)
+(*     ~mode:config.mode *)
