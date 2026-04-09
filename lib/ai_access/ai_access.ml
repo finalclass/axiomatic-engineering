@@ -101,21 +101,57 @@ let estimate_cost model inp outp =
   (float_of_int inp *. ipm /. 1_000_000.0)
   +. (float_of_int outp *. opm /. 1_000_000.0)
 
-(** Parse SSE data lines from a chunk. Returns list of JSON strings. *)
-let parse_sse_events chunk =
-  let events = ref [] in
-  let lines = String.split_on_char '\n' chunk in
-  List.iter
-    (fun line ->
-      let line = String.trim line in
-      if String.starts_with ~prefix:"data: " line
-      then
-        let data = String.sub line 6 (String.length line - 6) in
-        events := data :: !events )
-    lines ;
-  List.rev !events
+(** Parse complete SSE events from a running buffer.
+    Returns (complete event payloads, unconsumed tail). *)
+let extract_sse_events buffer =
+  let len = String.length buffer in
+  let is_event_sep i =
+    (i + 1 < len && buffer.[i] = '\n' && buffer.[i + 1] = '\n')
+    || (i + 3 < len
+       && buffer.[i] = '\r'
+       && buffer.[i + 1] = '\n'
+       && buffer.[i + 2] = '\r'
+       && buffer.[i + 3] = '\n')
+  in
+  let rec split_events start i acc =
+    if i >= len
+    then (List.rev acc, String.sub buffer start (len - start))
+    else if is_event_sep i
+    then
+      let event = String.sub buffer start (i - start) in
+      let next =
+        if buffer.[i] = '\n' then i + 2 else i + 4
+      in
+      split_events next next (event :: acc)
+    else split_events start (i + 1) acc
+  in
+  let raw_events, tail = split_events 0 0 [] in
+  let parse_event event =
+    let data_lines = ref [] in
+    event
+    |> String.split_on_char '\n'
+    |> List.iter (fun line ->
+         let line =
+           if String.length line > 0 && line.[String.length line - 1] = '\r'
+           then String.sub line 0 (String.length line - 1)
+           else line
+         in
+         if String.starts_with ~prefix:"data:" line
+         then
+           let payload =
+             if String.length line >= 6 && line.[5] = ' '
+             then String.sub line 6 (String.length line - 6)
+             else String.sub line 5 (String.length line - 5)
+           in
+           data_lines := payload :: !data_lines) ;
+    if !data_lines = []
+    then None
+    else Some (String.concat "\n" (List.rev !data_lines))
+  in
+  (List.filter_map parse_event raw_events, tail)
 
-(** Parse a single SSE event JSON. Returns (text_deltas, tool_uses, is_done). *)
+(** Parse a single SSE event JSON.
+    Returns (text_deltas, reasoning_deltas, tool_uses, is_done, error). *)
 let rec text_fragments_of_json = function
   | `String s -> [s]
   | `List items -> List.concat_map text_fragments_of_json items
@@ -125,12 +161,24 @@ let rec text_fragments_of_json = function
       | None -> [] )
   | _ -> []
 
+let error_message_of_json json =
+  let open Yojson.Safe.Util in
+  match json |> member "error" with
+  | `Null -> None
+  | `String s -> Some s
+  | `Assoc _ as err -> (
+      match err |> member "message" |> to_string_option with
+      | Some msg -> Some msg
+      | None -> Some (Yojson.Safe.to_string err) )
+  | other -> Some (Yojson.Safe.to_string other)
+
 let parse_sse_event data =
-  if data = "[DONE]" then ([], [], true)
+  if data = "[DONE]" then ([], [], [], true, None)
   else
     try
       let json = Yojson.Safe.from_string data in
       let open Yojson.Safe.Util in
+      let error = error_message_of_json json in
       (* OpenRouter SSE format: choices[0].delta.content / tool_calls *)
       let delta =
         match json |> member "choices" |> to_list with
@@ -139,6 +187,9 @@ let parse_sse_event data =
       in
       let text =
         delta |> member "content" |> text_fragments_of_json |> String.concat ""
+      in
+      let reasoning =
+        delta |> member "reasoning" |> text_fragments_of_json |> String.concat ""
       in
       let tool_uses =
         match delta |> member "tool_calls" with
@@ -157,18 +208,18 @@ let parse_sse_event data =
         | _ -> []
       in
       let finish_reason =
-        json
-        |> member "choices"
-        |> to_list
-        |> List.hd
-        |> fun c -> c |> member "finish_reason" |> to_string_option
+        match json |> member "choices" |> to_list with
+        | c :: _ -> c |> member "finish_reason" |> to_string_option
+        | [] -> None
       in
       ( (if text = "" then [] else [text])
+      , (if reasoning = "" then [] else [reasoning])
       , tool_uses
-      , match finish_reason with
-        | Some "stop" | Some "tool_calls" -> true
+      , ( match finish_reason with
+        | Some "stop" | Some "tool_calls" | Some "error" -> true
         | _ -> false )
-    with _ -> ([], [], false)
+      , error )
+    with _ -> ([], [], [], false, None)
 
 let send_openrouter
     ~api_key
@@ -195,24 +246,53 @@ let send_openrouter
 
       let accumulated_text = Buffer.create 1024 in
       let raw_response = Buffer.create 1024 in
+      let pending_sse = ref "" in
       let tool_use_map = Hashtbl.create 10 in
       let stream_done = ref false in
       let final_usage = ref (0, 0) in
+      let reasoning_started = ref false in
 
       let on_data chunk =
         Buffer.add_string raw_response chunk ;
-        let events = parse_sse_events chunk in
+        pending_sse := !pending_sse ^ chunk ;
+        let events, tail = extract_sse_events !pending_sse in
+        pending_sse := tail ;
         List.iter
           (fun data ->
             if !stream_done then ()
             else
-              let text_deltas, tool_calls, is_done = parse_sse_event data in
+              let text_deltas, reasoning_deltas, tool_calls, is_done, error =
+                parse_sse_event data
+              in
+              Option.iter
+                (fun message ->
+                  failwith
+                    (Printf.sprintf
+                       "OpenRouter streaming error for model `%s`: %s"
+                       model
+                       message))
+                error ;
               if is_done then stream_done := true ;
+              List.iter
+                (fun r ->
+                  if r <> ""
+                  then (
+                    if not !reasoning_started
+                    then (
+                      Printf.printf "\n[thinking] " ;
+                      reasoning_started := true ) ;
+                    print_string r ;
+                    flush stdout ))
+                reasoning_deltas ;
               (* Accumulate text *)
               List.iter
                 (fun t ->
                   if t <> ""
                   then (
+                    if !reasoning_started
+                    then (
+                      print_newline () ;
+                      reasoning_started := false ) ;
                     Buffer.add_string accumulated_text t ;
                     print_string t ;
                     flush stdout ))
@@ -275,67 +355,99 @@ let send_openrouter
              model
              (if body = "" then "" else " Response: " ^ body))
       else
-
-      let text_content = Buffer.contents accumulated_text in
-
-      (* Collect tool uses from the map *)
-      let tool_uses =
-        Hashtbl.fold
-          (fun _idx (id, name, input) acc -> (string_of_int id, name, input) :: acc)
-          tool_use_map []
-      in
-
-      let inp, outp = !final_usage in
-      let total_inp = total_inp + inp in
-      let total_outp = total_outp + outp in
-
-      if tool_uses <> []
-      then begin
-        (* Print tool call info *)
-        List.iter
-          (fun (_id, name, input) ->
-            let hint = format_tool_use_hint name input in
-            if hint <> ""
-            then Printf.printf "    → %s %s\n%!" name hint
-            else Printf.printf "    → %s\n%!" name )
-          tool_uses ;
-
-        let assistant_content =
-          if text_content <> ""
-          then `Text text_content :: List.map (fun (id, name, input) -> `Tool_use (id, name, input)) tool_uses
-          else List.map (fun (id, name, input) -> `Tool_use (id, name, input)) tool_uses
+        let remaining =
+          Buffer.contents raw_response |> String.trim
         in
-        let messages_with_assistant = messages @ [ ("assistant", assistant_content) ] in
-        let results =
-          List.map
-            (fun (id, name, input) ->
-              let result_str =
-                try execute_tool name input with
-                | exn -> Printf.sprintf "Error: %s" (Printexc.to_string exn)
-              in
-              Printf.printf "    ← %s\n%!" (String.trim result_str) ;
-              `Tool_result (id, result_str, false))
-            tool_uses
+
+        let text_content = Buffer.contents accumulated_text in
+
+        (* Collect tool uses from the map *)
+        let tool_uses =
+          Hashtbl.fold
+            (fun _idx (id, name, input) acc -> (string_of_int id, name, input) :: acc)
+            tool_use_map []
         in
-        let messages_with_results =
-          messages_with_assistant @ [ ("user", results) ]
-        in
-        loop messages_with_results (iteration + 1) total_inp total_outp
-      end
-      else
-        let cost = estimate_cost model total_inp total_outp in
-        let final_messages =
-          if text_content <> ""
-          then messages @ [ ("assistant", [ `Text text_content ]) ]
-          else messages
-        in
-        Ok
-          ( text_content
-          , final_messages
-          , Some
-              { Types.cost_usd= cost
-              ; input_tokens= total_inp
-              ; output_tokens= total_outp } )
+
+        if text_content = "" && tool_uses = [] && remaining <> ""
+        then
+          let shortened_remaining =
+            if String.length remaining > 800
+            then String.sub remaining 0 800 ^ "..."
+            else remaining
+          in
+          ( try
+              let json = Yojson.Safe.from_string remaining in
+              match error_message_of_json json with
+              | Some message ->
+                  Error
+                    (Printf.sprintf
+                       "OpenRouter returned an unparsed error for model `%s`: %s"
+                       model
+                       message)
+              | None ->
+                  Error
+                    (Printf.sprintf
+                       "OpenRouter returned an unparsed response for model `%s`: %s"
+                       model
+                       shortened_remaining)
+            with _ ->
+              Error
+                (Printf.sprintf
+                   "OpenRouter returned an unparsed response for model `%s`: %s"
+                   model
+                   shortened_remaining) )
+        else
+          let inp, outp = !final_usage in
+          let total_inp = total_inp + inp in
+          let total_outp = total_outp + outp in
+
+          if tool_uses <> []
+          then begin
+            (* Print tool call info *)
+            List.iter
+              (fun (_id, name, input) ->
+                let hint = format_tool_use_hint name input in
+                if hint <> ""
+                then Printf.printf "    → %s %s\n%!" name hint
+                else Printf.printf "    → %s\n%!" name )
+              tool_uses ;
+
+            let assistant_content =
+              if text_content <> ""
+              then `Text text_content :: List.map (fun (id, name, input) -> `Tool_use (id, name, input)) tool_uses
+              else List.map (fun (id, name, input) -> `Tool_use (id, name, input)) tool_uses
+            in
+            let messages_with_assistant = messages @ [ ("assistant", assistant_content) ] in
+            let results =
+              List.map
+                (fun (id, name, input) ->
+                  let result_str =
+                    try execute_tool name input with
+                    | exn -> Printf.sprintf "Error: %s" (Printexc.to_string exn)
+                  in
+                  Printf.printf "    ← %s\n%!" (String.trim result_str) ;
+                  `Tool_result (id, result_str, false))
+                tool_uses
+            in
+            let messages_with_results =
+              messages_with_assistant @ [ ("user", results) ]
+            in
+            loop messages_with_results (iteration + 1) total_inp total_outp
+          end
+          else
+            let cost = estimate_cost model total_inp total_outp in
+            let final_messages =
+              if text_content <> ""
+              then messages @ [ ("assistant", [ `Text text_content ]) ]
+              else messages
+            in
+            Ok
+              ( text_content
+              , final_messages
+              , Some
+                  { Types.cost_usd= cost
+                  ; input_tokens= total_inp
+                  ; output_tokens= total_outp } )
   in
 
   loop messages 0 0 0
