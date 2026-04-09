@@ -16,6 +16,9 @@ type message = string * content_block list
 
 let sessions : (string, message list) Hashtbl.t = Hashtbl.create 16
 
+let ansi_gray = "\027[90m"
+let ansi_reset = "\027[0m"
+
 open struct
 [@@@warning "-32"]
 
@@ -279,7 +282,7 @@ let send_openrouter
                   then (
                     if not !reasoning_started
                     then (
-                      Printf.printf "\n[thinking] " ;
+                      Printf.printf "\n%s[thinking] " ansi_gray ;
                       reasoning_started := true ) ;
                     print_string r ;
                     flush stdout ))
@@ -291,6 +294,7 @@ let send_openrouter
                   then (
                     if !reasoning_started
                     then (
+                      print_string ansi_reset ;
                       print_newline () ;
                       reasoning_started := false ) ;
                     Buffer.add_string accumulated_text t ;
@@ -337,6 +341,8 @@ let send_openrouter
           ~on_data
           "https://openrouter.ai/api/v1/chat/completions"
       in
+      if !reasoning_started
+      then print_string ansi_reset ;
       print_newline () ;
       flush stdout ;
 
