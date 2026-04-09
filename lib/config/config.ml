@@ -63,7 +63,7 @@ let load_impl ?(project_path = ".") () : Types.config =
   ; smart= get_string merged ["smart"] "m2.7"
   ; balanced= get_string merged ["balanced"] "m2.7"
   ; fast= get_string merged ["fast"] "k2.5"
-  ; vision= get_string merged ["vision"] "llama-vision"
+  ; vision= get_string merged ["vision"] "google/gemini-3-flash-preview"
   ; preprompt= get_string merged ["preprompt"] ""
   ; max_cycles= get_int merged ["max_cycles"] 3
   ; no_semantic= get_bool merged ["no_semantic"] false
@@ -75,8 +75,7 @@ let load_impl ?(project_path = ".") () : Types.config =
       | None -> Types.OpenRouter )
   ; api_key= get_string_opt merged ["api_key"]
   ; model_overrides= []
-  ; quiet
-  ; search_api_key= get_string_opt merged ["search_api_key"] }
+  ; quiet }
 
 let load ?(project_path = ".") () : Types.config =
   match !_cached with

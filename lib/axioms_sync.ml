@@ -25,7 +25,7 @@ let ensure_sth_to_implement ~impl_tasks f =
       ()
   | _ -> f ()
 
-let planning_phase ~impl_tasks =
+let planning_phase ~(api_key : string option) ~(model : string) ~impl_tasks =
   let tasks_str =
     impl_tasks
     |> List.map (fun (task : Types.task) ->
@@ -56,10 +56,13 @@ let planning_phase ~impl_tasks =
     %s
                |}
          tasks_str )
-    ~model:"qwen/qwen3.6-plus:free"
+    ~model
+    ?api_key
     ()
 
-let validation_phase ~(valid_tasks : Types.task list) : string option =
+let validation_phase ~(api_key : string option) ~(model : string)
+    ~(valid_tasks : Types.task list)
+    : string option =
   match valid_tasks with
   | [] -> None
   | _ ->
@@ -91,7 +94,8 @@ let validation_phase ~(valid_tasks : Types.task list) : string option =
           %s
                |}
                tasks_str )
-          ~model:"qwen/qwen3.6-plus:free"
+          ~model
+          ?api_key
           ()
       in
       if String.trim result = "NO ISSUES" then None else Some result
@@ -119,8 +123,9 @@ let parse_satisfaction_json (raw : string) : float * string =
       | Not_found -> (0.0, "Failed to parse score from response: " ^ raw) )
 
 (** Run a single satisfaction task, returns (task, score, reason) *)
-let run_one_satisfaction_task (task : Types.task) : Types.task * float * string
-    =
+let run_one_satisfaction_task ~(api_key : string option) ~(model : string)
+    (task : Types.task) :
+    Types.task * float * string =
   let threshold =
     match task.phase with
     | Types.Satisfaction t -> t
@@ -181,21 +186,23 @@ let run_one_satisfaction_task (task : Types.task) : Types.task * float * string
     Ai_access.prompt
       ~system_prompt
       ~user_prompt
-      ~model:"qwen/qwen3.6-plus:free"
+      ~model
+      ?api_key
       ()
   in
   let score, reason = parse_satisfaction_json raw in
   (task, score, reason)
 
 (** Run satisfaction checks in parallel. Returns None if all pass, Some issues string otherwise. *)
-let satisfaction_phase ~(satisfy_tasks : Types.task list) : string option =
+let satisfaction_phase ~(api_key : string option) ~(model : string)
+    ~(satisfy_tasks : Types.task list) : string option =
   match satisfy_tasks with
   | [] -> None
   | _ ->
       (* Collect results from parallel fibers *)
       let results : (Types.task * float * string) list ref = ref [] in
       let fiber_for_task task () =
-        let result = run_one_satisfaction_task task in
+        let result = run_one_satisfaction_task ~api_key ~model task in
         results := result :: !results
       in
       let fibers : (unit -> unit) list =
@@ -252,6 +259,7 @@ let satisfaction_phase ~(satisfy_tasks : Types.task list) : string option =
       if failures = [] then None else Some (String.concat "\n" failures)
 
 let implementation_phase
+    ~(api_key : string option)
     ~(plan : string)
     ~(session_id : string)
     ~(tool_base_dir : string)
@@ -259,12 +267,14 @@ let implementation_phase
   Ai_access.prompt
     ~system_prompt:implementation_system_prompt
     ~user_prompt:plan
+    ?api_key
     ~session_id
     ~tool_base_dir
     ~model
     ()
 
 let fix_implementation
+    ~(api_key : string option)
     ~(issues : string)
     ~(session_id : string)
     ~(tool_base_dir : string)
@@ -287,6 +297,7 @@ Issues to fix:
 %s
 |}
          issues )
+    ?api_key
     ~session_id
     ~tool_base_dir
     ~model
@@ -317,13 +328,17 @@ let run ~(config : Types.config) =
 
   ensure_sth_to_implement ~impl_tasks @@ fun () ->
   section "Checking" ;
-  Consistency.check_semantic_exn ~system ;
+  Consistency.check_semantic_exn
+    ~api_key:config.api_key
+    ~model:config.planner
+    ~system ;
 
-  let plan = planning_phase ~impl_tasks in
+  let plan = planning_phase ~api_key:config.api_key ~model:config.planner ~impl_tasks in
   let implementation_session_id = "axioms-sync:implementation" in
 
   section "Implementing" ;
   implementation_phase
+    ~api_key:config.api_key
     ~plan
     ~session_id:implementation_session_id
     ~tool_base_dir:project_path_str
@@ -341,7 +356,12 @@ let run ~(config : Types.config) =
     if iterations_left <= 0 then failwith "Implementation retry limit exceeded" ;
     let check_satisfaction () =
       section "Satisfying" ;
-      let satisfaction_result = satisfaction_phase ~satisfy_tasks in
+      let satisfaction_result =
+        satisfaction_phase
+          ~api_key:config.api_key
+          ~model:config.fast
+          ~satisfy_tasks
+      in
       ( match satisfaction_result with
       | None ->
           Fmt.pr "All satisfaction checks passed.%!\n%!" ;
@@ -349,6 +369,7 @@ let run ~(config : Types.config) =
       | Some issues ->
           Fmt.pr "Satisfaction issues:\n%s\n%!" issues ;
           fix_implementation
+            ~api_key:config.api_key
             ~issues
             ~session_id:implementation_session_id
             ~tool_base_dir:project_path_str
@@ -358,7 +379,12 @@ let run ~(config : Types.config) =
       ()
     in
 
-    let validation_result = validation_phase ~valid_tasks in
+    let validation_result =
+      validation_phase
+        ~api_key:config.api_key
+        ~model:config.balanced
+        ~valid_tasks
+    in
     match validation_result with
     | None ->
         Fmt.pr "No validation issues found.%!\n%!" ;
@@ -366,6 +392,7 @@ let run ~(config : Types.config) =
     | Some issues ->
         Fmt.pr "Validation issues:\n%s\n%!" issues ;
         fix_implementation
+          ~api_key:config.api_key
           ~issues
           ~session_id:implementation_session_id
           ~tool_base_dir:project_path_str

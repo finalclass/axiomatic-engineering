@@ -67,7 +67,6 @@ lib/config/
 | `provider`        | ai_provider          | `Cli` (lub `OpenRouter` jeśli jest api_key) | -                      | `AS_PROVIDER`       |
 | `api_key`         | string option        | `None`                                      | `OPENROUTER_API_KEY`   | `AS_API_KEY`        |
 | `model_overrides` | (string*string) list | `[]`                                        | -                      | -                   |
-| `search_api_key`  | string option        | `None`                                      | `BRAVE_SEARCH_API_KEY` | `AS_SEARCH_API_KEY` |
 
 ### Flagi CLI (bez wartości)
 
@@ -89,7 +88,6 @@ type t = {
   provider: Types.ai_provider;
   api_key: string option;
   model_overrides: (string * string) list;
-  search_api_key: string option;
   (* ... inne pola ... *)
 }
 

@@ -117,6 +117,15 @@ let parse_sse_events chunk =
   List.rev !events
 
 (** Parse a single SSE event JSON. Returns (text_deltas, tool_uses, is_done). *)
+let rec text_fragments_of_json = function
+  | `String s -> [s]
+  | `List items -> List.concat_map text_fragments_of_json items
+  | `Assoc fields -> (
+      match List.assoc_opt "text" fields with
+      | Some json -> text_fragments_of_json json
+      | None -> [] )
+  | _ -> []
+
 let parse_sse_event data =
   if data = "[DONE]" then ([], [], true)
   else
@@ -130,9 +139,7 @@ let parse_sse_event data =
         | [] -> `Null
       in
       let text =
-        match delta |> member "content" |> to_string_option with
-        | Some "" | None -> ""
-        | Some s -> s
+        delta |> member "content" |> text_fragments_of_json |> String.concat ""
       in
       let tool_uses =
         match delta |> member "tool_calls" with
@@ -157,7 +164,7 @@ let parse_sse_event data =
         |> List.hd
         |> fun c -> c |> member "finish_reason" |> to_string_option
       in
-      ( [text]
+      ( (if text = "" then [] else [text])
       , tool_uses
       , match finish_reason with
         | Some "stop" | Some "tool_calls" -> true
@@ -322,6 +329,7 @@ let prompt
     ~(system_prompt : string)
     ~(user_prompt : string)
     ~(model : string)
+    ?api_key
     ?session_id
     ?(toolset : toolset = All_tools)
     ?(tool_base_dir : string = Sys.getcwd ())
@@ -353,9 +361,16 @@ let prompt
         previous_messages @ [ ("user", [ `Text user_prompt ]) ]
   in
   let api_key =
-    match Sys.getenv_opt "OPENROUTER_API_KEY" with
+    match api_key with
     | Some k -> k
-    | None -> failwith "OPENROUTER_API_KEY environment variable not set"
+    | None -> (
+      match Sys.getenv_opt "OPENROUTER_API_KEY" with
+      | Some k -> k
+      | None ->
+          failwith
+            "OpenRouter API key not set. Configure `api_key` in \
+             ~/.config/axioms-sync.toml or set AS_API_KEY / \
+             OPENROUTER_API_KEY" )
   in
   match
     send_openrouter

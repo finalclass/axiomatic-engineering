@@ -108,8 +108,7 @@ type config =
   ; timings: bool
   ; provider: ai_provider  (** AI provider: Cli or OpenRouter *)
   ; api_key: string option
-  ; model_overrides: (string * string) list
-  ; search_api_key: string option }
+  ; model_overrides: (string * string) list }
 
 let default_config =
   { project_path= "."
@@ -119,7 +118,7 @@ let default_config =
   ; smart= "m2.7"
   ; balanced= "m2.7"
   ; fast= "k2.5"
-  ; vision= "k2.5"
+  ; vision= "google/gemini-3-flash-preview"
   ; preprompt= ""
   ; quiet= false
   ; max_cycles= 3
@@ -128,8 +127,7 @@ let default_config =
   ; timings= false
   ; provider= OpenRouter
   ; api_key= None
-  ; model_overrides= []
-  ; search_api_key= None }
+  ; model_overrides= [] }
 
 (** Resolve model class for a task. Label override takes priority, then phase default. *)
 let resolve_model_class ?label_class phase =

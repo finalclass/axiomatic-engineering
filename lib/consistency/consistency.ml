@@ -92,7 +92,10 @@ let check_exn (system : axiom_system) =
       List.iter (fun e -> Printf.eprintf "  %s\n" (error_to_string e)) errs ;
       exit 1
 
-let check_semantic_exn ~(system : Types.system) =
+let check_semantic_exn
+    ~(api_key : string option)
+    ~(model : string)
+    ~(system : Types.system) =
   let system_prompt =
     "You are a consistency checker. Analyze the axioms below for semantic \
      contradictions — requirements that conflict with each other, impossible \
@@ -114,20 +117,22 @@ let check_semantic_exn ~(system : Types.system) =
   in
 
   let result =
-    Ai_access.prompt ~system_prompt ~user_prompt ~model:"qwen/qwen3.6-plus:free" ()
+    Ai_access.prompt
+      ~system_prompt
+      ~user_prompt
+      ~model
+      ~toolset:Ai_access.No_tools
+      ?api_key
+      ()
   in
+  let result = String.trim result in
 
-  let has_no_contradictions =
-    let len = String.length result in
-    let needle = "NO_CONTRADICTIONS" in
-    let nlen = String.length needle in
-    let found = ref false in
-    for i = 0 to len - nlen do
-      if String.sub result i nlen = needle then found := true
-    done ;
-    !found
-  in
-  if has_no_contradictions
+  if result = ""
+  then
+    failwith
+      "Semantic consistency check returned an empty response. No contradiction \
+       details were provided by the model."
+  else if String.starts_with ~prefix:"NO_CONTRADICTIONS" result
   then Fmt.pr "Semantic check passed — no contradictions found.\n@."
   else
     failwith (Fmt.str "Semantic contradictions found:\n\n%s\n@." result)
