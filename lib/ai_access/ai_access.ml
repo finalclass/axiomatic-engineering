@@ -1,7 +1,6 @@
 (** AI Access — OpenRouter API with SSE streaming *)
 
 let net : Obj.t option ref = ref None
-
 let set_net (n : 'a) : unit = net := Some (Obj.repr n)
 
 type toolset =
@@ -101,24 +100,6 @@ let estimate_cost model inp outp =
   in
   (float_of_int inp *. ipm /. 1_000_000.0)
   +. (float_of_int outp *. opm /. 1_000_000.0)
-
-let with_unix_timeout ~(seconds : int) f =
-  if seconds <= 0
-  then f ()
-  else
-    let timed_out = ref false in
-    let previous = Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ -> timed_out := true)) in
-    let previous_alarm = Unix.alarm seconds in
-    Fun.protect
-      ~finally:(fun () ->
-        ignore (Unix.alarm 0) ;
-        ignore (Sys.signal Sys.sigalrm previous) ;
-        if previous_alarm > 0 then ignore (Unix.alarm previous_alarm))
-      (fun () ->
-        let result = f () in
-        if !timed_out
-        then failwith (Printf.sprintf "OpenRouter request timed out after %ds" seconds)
-        else result)
 
 (** Parse SSE data lines from a chunk. Returns list of JSON strings. *)
 let parse_sse_events chunk =
@@ -267,7 +248,6 @@ let send_openrouter
       in
 
       let status, _headers =
-        with_unix_timeout ~seconds:60 @@ fun () ->
         Well.fetch_stream_with_net
           ~net:(get_net ())
           ~headers:
