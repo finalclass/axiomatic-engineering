@@ -93,6 +93,7 @@ let check_exn (system : axiom_system) =
       exit 1
 
 let check_semantic_exn
+    ~(total_cost : float ref)
     ~(api_key : string option)
     ~(model : string)
     ~(system : Types.system) =
@@ -124,6 +125,9 @@ let check_semantic_exn
       ~toolset:Ai_access.No_tools
       ?api_key
       ()
+    |> fun response ->
+    total_cost := !total_cost +. response.Types.cost ;
+    response.Types.result
   in
   let result = String.trim result in
 

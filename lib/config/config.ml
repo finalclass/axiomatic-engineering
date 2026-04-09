@@ -21,21 +21,27 @@ let get_string toml key default =
   | None -> default
 
 let get_bool toml key default =
-  match Well.Toml.get_string toml key with
-  | Some "true"
-   |Some "1" ->
-      true
-  | Some "false"
-   |Some "0" ->
-      false
-  | _ -> default
+  match Well.Toml.get_bool toml key with
+  | Some v -> v
+  | None -> (
+    match Well.Toml.get_string toml key with
+    | Some "true"
+     |Some "1" ->
+        true
+    | Some "false"
+     |Some "0" ->
+        false
+    | _ -> default )
 
 let get_int toml key default =
-  match Well.Toml.get_string toml key with
-  | Some s -> (
-    try int_of_string s with
-    | Failure _ -> default )
-  | None -> default
+  match Well.Toml.get_int toml key with
+  | Some v -> v
+  | None -> (
+    match Well.Toml.get_string toml key with
+    | Some s -> (
+      try int_of_string s with
+      | Failure _ -> default )
+    | None -> default )
 
 let get_string_opt toml key = Well.Toml.get_string toml key
 

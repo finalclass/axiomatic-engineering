@@ -8,6 +8,10 @@ type cost_info =
   ; input_tokens: int
   ; output_tokens: int }
 
+type ai_response =
+  { result: string
+  ; cost: float }
+
 (** Tool definition for AI agents *)
 type tool_def =
   { name: string

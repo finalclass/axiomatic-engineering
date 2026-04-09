@@ -7,6 +7,16 @@ let section title =
      ────────────────────────────────────────────────────────────────────────────────────────────────────\n"
     title
 
+let add_cost ~(total_cost : float ref) (response : Types.ai_response) =
+  total_cost := !total_cost +. response.cost ;
+  response
+
+let prompt_result ~(total_cost : float ref) response =
+  add_cost ~total_cost response |> fun response -> response.Types.result
+
+let format_total_cost total_cost =
+  Fmt.str "Sync complete. Total cost: $%.4f @." total_cost
+
 let implementation_system_prompt =
   {|
       This is an axiomatic project. User writes axioms and then your job is
@@ -25,7 +35,8 @@ let ensure_sth_to_implement ~impl_tasks f =
       ()
   | _ -> f ()
 
-let planning_phase ~(api_key : string option) ~(model : string) ~impl_tasks =
+let planning_phase ~(total_cost : float ref) ~(api_key : string option)
+    ~(model : string) ~impl_tasks =
   let tasks_str =
     impl_tasks
     |> List.map (fun (task : Types.task) ->
@@ -59,8 +70,10 @@ let planning_phase ~(api_key : string option) ~(model : string) ~impl_tasks =
     ~model
     ?api_key
     ()
+  |> prompt_result ~total_cost
 
-let validation_phase ~(api_key : string option) ~(model : string)
+let validation_phase ~(total_cost : float ref) ~(api_key : string option)
+    ~(model : string)
     ~(valid_tasks : Types.task list)
     : string option =
   match valid_tasks with
@@ -97,6 +110,7 @@ let validation_phase ~(api_key : string option) ~(model : string)
           ~model
           ?api_key
           ()
+        |> prompt_result ~total_cost
       in
       if String.trim result = "NO ISSUES" then None else Some result
 
@@ -123,7 +137,8 @@ let parse_satisfaction_json (raw : string) : float * string =
       | Not_found -> (0.0, "Failed to parse score from response: " ^ raw) )
 
 (** Run a single satisfaction task, returns (task, score, reason) *)
-let run_one_satisfaction_task ~(api_key : string option) ~(model : string)
+let run_one_satisfaction_task ~(total_cost : float ref)
+    ~(api_key : string option) ~(model : string)
     (task : Types.task) :
     Types.task * float * string =
   let threshold =
@@ -189,12 +204,14 @@ let run_one_satisfaction_task ~(api_key : string option) ~(model : string)
       ~model
       ?api_key
       ()
+    |> prompt_result ~total_cost
   in
   let score, reason = parse_satisfaction_json raw in
   (task, score, reason)
 
 (** Run satisfaction checks in parallel. Returns None if all pass, Some issues string otherwise. *)
-let satisfaction_phase ~(api_key : string option) ~(model : string)
+let satisfaction_phase ~(total_cost : float ref) ~(api_key : string option)
+    ~(model : string)
     ~(satisfy_tasks : Types.task list) : string option =
   match satisfy_tasks with
   | [] -> None
@@ -202,7 +219,9 @@ let satisfaction_phase ~(api_key : string option) ~(model : string)
       (* Collect results from parallel fibers *)
       let results : (Types.task * float * string) list ref = ref [] in
       let fiber_for_task task () =
-        let result = run_one_satisfaction_task ~api_key ~model task in
+        let result =
+          run_one_satisfaction_task ~total_cost ~api_key ~model task
+        in
         results := result :: !results
       in
       let fibers : (unit -> unit) list =
@@ -259,6 +278,7 @@ let satisfaction_phase ~(api_key : string option) ~(model : string)
       if failures = [] then None else Some (String.concat "\n" failures)
 
 let implementation_phase
+    ~(total_cost : float ref)
     ~(api_key : string option)
     ~(plan : string)
     ~(session_id : string)
@@ -272,8 +292,10 @@ let implementation_phase
     ~tool_base_dir
     ~model
     ()
+  |> add_cost ~total_cost
 
 let fix_implementation
+    ~(total_cost : float ref)
     ~(api_key : string option)
     ~(issues : string)
     ~(session_id : string)
@@ -302,6 +324,7 @@ Issues to fix:
     ~tool_base_dir
     ~model
     ()
+  |> add_cost ~total_cost
 
 let run ~(config : Types.config) =
   Mirage_crypto_rng_unix.use_default () ;
@@ -311,6 +334,7 @@ let run ~(config : Types.config) =
   let fs = Eio.Stdenv.fs env in
   let project_path = Eio.Path.(fs / config.project_path) in
   let project_path_str = Eio.Path.native_exn project_path in
+  let total_cost = ref 0.0 in
   let axioms_dir = Eio.Path.(project_path / "axioms") in
   let code_dir = Eio.Path.(project_path / "code") in
   let system = Loader.load_exn axioms_dir in
@@ -329,15 +353,23 @@ let run ~(config : Types.config) =
   ensure_sth_to_implement ~impl_tasks @@ fun () ->
   section "Checking" ;
   Consistency.check_semantic_exn
+    ~total_cost
     ~api_key:config.api_key
     ~model:config.planner
     ~system ;
 
-  let plan = planning_phase ~api_key:config.api_key ~model:config.planner ~impl_tasks in
+  let plan =
+    planning_phase
+      ~total_cost
+      ~api_key:config.api_key
+      ~model:config.planner
+      ~impl_tasks
+  in
   let implementation_session_id = "axioms-sync:implementation" in
 
   section "Implementing" ;
   implementation_phase
+    ~total_cost
     ~api_key:config.api_key
     ~plan
     ~session_id:implementation_session_id
@@ -358,6 +390,7 @@ let run ~(config : Types.config) =
       section "Satisfying" ;
       let satisfaction_result =
         satisfaction_phase
+          ~total_cost
           ~api_key:config.api_key
           ~model:config.fast
           ~satisfy_tasks
@@ -369,6 +402,7 @@ let run ~(config : Types.config) =
       | Some issues ->
           Fmt.pr "Satisfaction issues:\n%s\n%!" issues ;
           fix_implementation
+            ~total_cost
             ~api_key:config.api_key
             ~issues
             ~session_id:implementation_session_id
@@ -381,6 +415,7 @@ let run ~(config : Types.config) =
 
     let validation_result =
       validation_phase
+        ~total_cost
         ~api_key:config.api_key
         ~model:config.balanced
         ~valid_tasks
@@ -392,6 +427,7 @@ let run ~(config : Types.config) =
     | Some issues ->
         Fmt.pr "Validation issues:\n%s\n%!" issues ;
         fix_implementation
+          ~total_cost
           ~api_key:config.api_key
           ~issues
           ~session_id:implementation_session_id
@@ -404,4 +440,4 @@ let run ~(config : Types.config) =
   loop 50 @@ fun () ->
   section "Saving freeze" ;
   Snapshot.save_freeze ~project_path ;
-  Fmt.pr "Sync complete. @."
+  Fmt.pr "%s" (format_total_cost !total_cost)

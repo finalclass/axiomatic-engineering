@@ -336,7 +336,7 @@ let prompt
     ?tools
     ?execute_tool
     ?(max_iterations : int = 25)
-    () : string =
+    () : Types.ai_response =
   let tools, execute_tool =
     match (tools, execute_tool) with
     | Some tools, Some execute_tool -> (tools, execute_tool)
@@ -382,9 +382,13 @@ let prompt
       ~execute_tool
       ~max_iterations
   with
-  | Ok (text, final_messages, _) ->
+  | Ok (text, final_messages, cost_info) ->
       Option.iter
         (fun session_id -> Hashtbl.replace sessions session_id final_messages)
         session_id ;
-      text
+      { Types.result= text
+      ; cost=
+          (match cost_info with
+          | Some cost_info -> cost_info.cost_usd
+          | None -> 0.0) }
   | Error msg -> failwith msg
