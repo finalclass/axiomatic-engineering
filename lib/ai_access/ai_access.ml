@@ -102,6 +102,24 @@ let estimate_cost model inp outp =
   (float_of_int inp *. ipm /. 1_000_000.0)
   +. (float_of_int outp *. opm /. 1_000_000.0)
 
+let with_unix_timeout ~(seconds : int) f =
+  if seconds <= 0
+  then f ()
+  else
+    let timed_out = ref false in
+    let previous = Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ -> timed_out := true)) in
+    let previous_alarm = Unix.alarm seconds in
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Unix.alarm 0) ;
+        ignore (Sys.signal Sys.sigalrm previous) ;
+        if previous_alarm > 0 then ignore (Unix.alarm previous_alarm))
+      (fun () ->
+        let result = f () in
+        if !timed_out
+        then failwith (Printf.sprintf "OpenRouter request timed out after %ds" seconds)
+        else result)
+
 (** Parse SSE data lines from a chunk. Returns list of JSON strings. *)
 let parse_sse_events chunk =
   let events = ref [] in
@@ -195,11 +213,13 @@ let send_openrouter
       let body_str = Yojson.Safe.to_string body in
 
       let accumulated_text = Buffer.create 1024 in
+      let raw_response = Buffer.create 1024 in
       let tool_use_map = Hashtbl.create 10 in
       let stream_done = ref false in
       let final_usage = ref (0, 0) in
 
       let on_data chunk =
+        Buffer.add_string raw_response chunk ;
         let events = parse_sse_events chunk in
         List.iter
           (fun data ->
@@ -246,7 +266,8 @@ let send_openrouter
           events
       in
 
-      let _status_headers =
+      let status, _headers =
+        with_unix_timeout ~seconds:60 @@ fun () ->
         Well.fetch_stream_with_net
           ~net:(get_net ())
           ~headers:
@@ -258,6 +279,22 @@ let send_openrouter
       in
       print_newline () ;
       flush stdout ;
+
+      if status <> 200
+      then
+        let body = Buffer.contents raw_response |> String.trim in
+        let body =
+          if String.length body > 800
+          then String.sub body 0 800 ^ "..."
+          else body
+        in
+        Error
+          (Printf.sprintf
+             "OpenRouter returned HTTP %d for model `%s`.%s"
+             status
+             model
+             (if body = "" then "" else " Response: " ^ body))
+      else
 
       let text_content = Buffer.contents accumulated_text in
 
