@@ -67,6 +67,9 @@ let parse_cli_args (args : string list) =
     | "--planner" :: v :: rest ->
         set_string "planner" v ;
         parse rest
+    | "--semantic" :: v :: rest ->
+        set_string "semantic" v ;
+        parse rest
     | "--implementer" :: v :: rest ->
         set_string "implementer" v ;
         parse rest

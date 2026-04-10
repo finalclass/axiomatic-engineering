@@ -65,6 +65,7 @@ let load_impl ?(project_path = ".") () : Types.config =
         | Some axiom -> `Specific [axiom]
         | None -> `Diff ) )
   ; planner= get_string merged ["planner"] "deepseek-v3.2"
+  ; semantic= get_string merged ["semantic"] "k2.5"
   ; implementer= get_string merged ["implementer"] "m2.7"
   ; smart= get_string merged ["smart"] "m2.7"
   ; balanced= get_string merged ["balanced"] "m2.7"

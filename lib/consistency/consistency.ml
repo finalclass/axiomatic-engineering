@@ -11,6 +11,105 @@ type error =
       { label: string
       ; key: string }
 
+type semantic_result =
+  | No_contradictions
+  | Contradictions of string
+  | Invalid_response of string
+
+type semantic_candidate_result =
+  | No_contradiction_candidates
+  | Contradiction_candidates of string list
+  | Invalid_candidate_response of string
+
+let contradiction_block_marker = "END_CONTRADICTION"
+
+let excerpt text =
+  let text = String.trim text in
+  if String.length text > 240 then String.sub text 0 240 ^ "..." else text
+
+let contains text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0
+    then true
+    else if i + needle_len > text_len
+    then false
+    else if String.sub text i needle_len = needle
+    then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let classify_semantic_result result =
+  let result = String.trim result in
+  if result = ""
+  then
+    Invalid_response
+      "Semantic consistency check returned an empty response. No contradiction \
+       details were provided by the model."
+  else if String.starts_with ~prefix:"NO_CONTRADICTIONS" result
+  then No_contradictions
+  else if String.starts_with ~prefix:"CONTRADICTION" result
+          && String.contains result '\n'
+          && String.contains result ':'
+          && contains result contradiction_block_marker
+  then Contradictions result
+  else
+    Invalid_response
+      (Fmt.str
+         "Semantic consistency check returned an incomplete or malformed \
+          response: %s"
+         (excerpt result))
+
+let parse_candidate_ids text =
+  let ids =
+    text
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+  in
+  let ids = List.sort_uniq String.compare ids in
+  if ids = [] then None else Some ids
+
+let classify_semantic_candidate_result result =
+  let result = String.trim result in
+  if result = "NO_CONTRADICTIONS"
+  then No_contradiction_candidates
+  else if String.starts_with ~prefix:"CONTRADICTION_IDS:" result
+  then
+    let prefix = "CONTRADICTION_IDS:" in
+    let ids_part =
+      String.sub result (String.length prefix) (String.length result - String.length prefix)
+      |> String.trim
+    in
+    (match parse_candidate_ids ids_part with
+    | Some ids -> Contradiction_candidates ids
+    | None ->
+        Invalid_candidate_response
+          "Semantic candidate check returned `CONTRADICTION_IDS:` without any ids.")
+  else
+    Invalid_candidate_response
+      (Fmt.str
+         "Semantic candidate check returned an incomplete or malformed \
+          response: %s"
+         (excerpt result))
+
+let error_message_of_exn exn =
+  match exn with
+  | Failure msg -> msg
+  | _ -> Printexc.to_string exn
+
+let is_non_retryable_error msg =
+  let patterns =
+    [ "finish_reason=length"
+    ; "was truncated because it hit the max token limit"
+    ; "ended after reasoning without final answer text"
+    ; "returned an incomplete or malformed response"
+    ; "returned an invalid response" ]
+  in
+  List.exists (contains msg) patterns
+
 (** Check that all referenced axiom files exist in the system *)
 let check_references (system : axiom_system) : error list =
   let known_ids = List.map (fun (a : axiom) -> a.id) system.axioms in
@@ -97,46 +196,207 @@ let check_semantic_exn
     ~(api_key : string option)
     ~(model : string)
     ~(system : Types.system) =
-  let system_prompt =
-    "You are a consistency checker. Analyze the axioms below for semantic \
-     contradictions — requirements that conflict with each other, impossible \
-     constraints, or mutually exclusive goals. If you find NO contradictions, \
-     respond with exactly: NO_CONTRADICTIONS - and nothing else, ONLY this \
-     text. If you find contradictions, describe each one clearly."
+  let candidate_system_prompt =
+    {|
+    You are a consistency checker for an axiomatic specification.
+
+    Detect only real semantic contradictions:
+    - two or more hard requirements that cannot all be true at the same time
+    - impossible constraints
+    - mutually exclusive obligations or goals
+
+    Ignore ambiguity, underspecification, minor wording differences, tradeoffs,
+    and anything that could reasonably coexist by interpretation.
+
+    Output in exactly one of these formats:
+    NO_CONTRADICTIONS
+    CONTRADICTION_IDS: <comma-separated axiom ids involved in any real contradiction>
+
+    Rules:
+    - Output only one line.
+    - No explanation.
+    - Include only axiom ids that are part of at least one real contradiction.
+    - If unsure, prefer NO_CONTRADICTIONS.
+    |}
   in
-  let axiom_content =
-    system.axioms
+  let detail_system_prompt =
+    {|
+    You are a consistency checker for an axiomatic specification.
+
+    Your task is to detect only real semantic contradictions:
+    - two or more hard requirements that cannot all be true at the same time
+    - impossible constraints
+    - mutually exclusive obligations or goals
+
+    Do NOT report any of the following as contradictions:
+    - minor wording differences
+    - ambiguity or underspecification
+    - differences in precision or terminology
+    - tensions, tradeoffs, or preferences that could be resolved by interpretation
+    - requirements that can reasonably coexist with defaults, prioritization, or scoped interpretation
+
+    Be conservative. If there is any reasonable interpretation under which the statements can all be satisfied together, treat that as NO contradiction.
+
+    Only report an issue when you can point to specific statements that are jointly impossible to satisfy.
+
+    If you find NO real contradictions, respond with exactly:
+    NO_CONTRADICTIONS
+
+    and nothing else.
+
+    If you do find contradictions, respond using one or more blocks in exactly
+    this format:
+
+    CONTRADICTION
+    Axiom IDs: <comma-separated axiom ids>
+    Statements:
+    - <first conflicting statement>
+    - <second conflicting statement>
+    Why impossible: <short explanation>
+    END_CONTRADICTION
+
+    Do not include any intro, summary, or commentary outside these blocks.
+    |}
+  in
+  let axiom_content axioms =
+    axioms
     |> List.map (fun axiom ->
-        Fmt.str
-          "**%s**\n\n%s\n----------------------------------------"
-          axiom.id
-          axiom.raw_content )
+           Fmt.str
+             "**%s**\n\n%s\n----------------------------------------"
+             axiom.id
+             axiom.raw_content)
     |> String.concat "\n"
   in
-  let user_prompt =
-    Fmt.str "Analyze these axioms for contradictions:\n\n%s" axiom_content
+  let candidate_user_prompt =
+    Fmt.str
+      "Analyze these axioms for real semantic contradictions only. Return only \
+       `NO_CONTRADICTIONS` or `CONTRADICTION_IDS: ...`.\n\n%s"
+      (axiom_content system.axioms)
   in
-
-  let result =
-    Ai_access.prompt
+  let detail_user_prompt axioms =
+    Fmt.str
+      "Analyze only these candidate axioms and report real semantic \
+       contradictions using the required block format.\n\n%s"
+      (axiom_content axioms)
+  in
+  let find_axioms_by_ids ids =
+    ids
+    |> List.filter_map (fun id ->
+           List.find_opt (fun (axiom : axiom) -> axiom.id = id) system.axioms)
+  in
+  let rec run_with_retry
+      ~label
       ~system_prompt
       ~user_prompt
-      ~model
-      ~toolset:Ai_access.No_tools
-      ?api_key
-      ()
-    |> fun response ->
-    total_cost := !total_cost +. response.Types.cost ;
-    response.Types.result
+      ~classify
+      attempt
+      last_error =
+    if attempt > 3
+    then
+      failwith
+        (Fmt.str
+           "%s failed after %d attempts.%s"
+           label
+           (attempt - 1)
+           (match last_error with
+           | None -> ""
+           | Some err -> Fmt.str " Last error: %s" err))
+    else
+      let attempt_result =
+        try
+          let response =
+            Ai_access.prompt
+              ~system_prompt
+              ~user_prompt
+              ~model
+              ~toolset:Ai_access.No_tools
+              ?api_key
+              ()
+          in
+          total_cost := !total_cost +. response.Types.cost ;
+          Ok (classify response.Types.result)
+        with
+        | exn -> Error (`Failure (error_message_of_exn exn))
+      in
+      match attempt_result with
+      | Ok (Ok result) -> result
+      | Ok (Error msg) ->
+          if attempt < 3 && not (is_non_retryable_error msg)
+          then (
+            Fmt.pr
+              "%s attempt %d/3 returned an invalid \
+               response, retrying: %s\n%!"
+              label
+              attempt
+              msg ;
+            Unix.sleepf (0.75 *. float_of_int attempt) ;
+            run_with_retry
+              ~label
+              ~system_prompt
+              ~user_prompt
+              ~classify
+              (attempt + 1)
+              (Some msg) )
+          else failwith msg
+      | Error (`Failure msg) ->
+          if attempt < 3 && not (is_non_retryable_error msg)
+          then (
+            Fmt.pr
+              "%s attempt %d/3 failed, retrying: %s\n%!"
+              label
+              attempt
+              msg ;
+            Unix.sleepf (0.75 *. float_of_int attempt) ;
+            run_with_retry
+              ~label
+              ~system_prompt
+              ~user_prompt
+              ~classify
+              (attempt + 1)
+              (Some msg) )
+          else failwith msg
   in
-  let result = String.trim result in
-
-  if result = ""
-  then
-    failwith
-      "Semantic consistency check returned an empty response. No contradiction \
-       details were provided by the model."
-  else if String.starts_with ~prefix:"NO_CONTRADICTIONS" result
-  then Fmt.pr "Semantic check passed — no contradictions found.\n@."
-  else
-    failwith (Fmt.str "Semantic contradictions found:\n\n%s\n@." result)
+  let candidate_result =
+    run_with_retry
+      ~label:"Semantic candidate check"
+      ~system_prompt:candidate_system_prompt
+      ~user_prompt:candidate_user_prompt
+      ~classify:(fun raw ->
+        match classify_semantic_candidate_result raw with
+        | No_contradiction_candidates -> Ok No_contradiction_candidates
+        | Contradiction_candidates ids -> Ok (Contradiction_candidates ids)
+        | Invalid_candidate_response msg -> Error msg)
+      1
+      None
+  in
+  match candidate_result with
+  | No_contradiction_candidates ->
+      Fmt.pr "Semantic check passed — no contradictions found.\n@."
+  | Contradiction_candidates ids ->
+      let candidate_axioms = find_axioms_by_ids ids in
+      if candidate_axioms = []
+      then
+        failwith
+          "Semantic candidate check returned contradiction ids that were not \
+           found in the loaded axioms."
+      else
+        let result =
+          run_with_retry
+            ~label:"Semantic detail check"
+            ~system_prompt:detail_system_prompt
+            ~user_prompt:(detail_user_prompt candidate_axioms)
+            ~classify:(fun raw ->
+              match classify_semantic_result raw with
+              | No_contradictions -> Ok No_contradictions
+              | Contradictions details -> Ok (Contradictions details)
+              | Invalid_response msg -> Error msg)
+            1
+            None
+        in
+        (match result with
+        | No_contradictions ->
+            Fmt.pr "Semantic check passed — no contradictions found.\n@."
+        | Contradictions details ->
+            failwith (Fmt.str "Semantic contradictions found:\n\n%s\n@." details)
+        | Invalid_response msg -> failwith msg)
+  | Invalid_candidate_response msg -> failwith msg

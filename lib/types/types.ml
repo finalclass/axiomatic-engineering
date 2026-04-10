@@ -99,6 +99,7 @@ type config =
   { project_path: string
   ; mode: [`Diff | `Full | `Specific of string list]
   ; planner: string  (** model alias for planning *)
+  ; semantic: string  (** model alias for semantic consistency checks *)
   ; implementer: string  (** model alias e.g. "opus4.6" *)
   ; smart: string
   ; quiet: bool
@@ -118,6 +119,7 @@ let default_config =
   { project_path= "."
   ; mode= `Diff
   ; planner= "deepseek-v3.2"
+  ; semantic= "k2.5"
   ; implementer= "m2.7"
   ; smart= "m2.7"
   ; balanced= "m2.7"
