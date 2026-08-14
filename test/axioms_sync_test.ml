@@ -53,6 +53,49 @@ let expect_satisfaction_invalid text =
   | Axioms_sync.Satisfaction_invalid _ -> ()
   | _ -> failwith "expected invalid satisfaction response"
 
+let make_label name =
+  { Axioms_sync.Types.name
+  ; phases= [Axioms_sync.Types.Implementation]
+  ; hidden_phases= []
+  ; markers= []
+  ; model_class= None
+  ; description= "" }
+
+let make_task ~axiom_id ~label ~context =
+  { Axioms_sync.Types.axiom_id
+  ; section_anchor= None
+  ; label= make_label label
+  ; phase= Axioms_sync.Types.Implementation
+  ; context
+  ; model_class= Axioms_sync.Types.Smart }
+
+let expect_planning_axiom_dedup () =
+  let tasks =
+    [ make_task ~axiom_id:"a.md" ~label:"api" ~context:"same context"
+    ; make_task ~axiom_id:"a.md" ~label:"ui" ~context:"same context"
+    ; make_task ~axiom_id:"b.md" ~label:"worker" ~context:"other context" ]
+  in
+  let axioms = Axioms_sync.planning_axioms_of_impl_tasks tasks in
+  match axioms with
+  | [a; b] ->
+      if a.axiom_id <> "a.md" then failwith "expected first axiom to be a.md" ;
+      if a.labels <> ["api"; "ui"] then failwith "expected merged labels" ;
+      if b.axiom_id <> "b.md" then failwith "expected second axiom to be b.md"
+  | _ -> failwith "expected tasks to be deduplicated by axiom"
+
+let expect_planning_budget_compacts () =
+  let long_text = String.make 4000 'x' in
+  let tasks = [make_task ~axiom_id:"a.md" ~label:"api" ~context:long_text] in
+  let axiom =
+    Axioms_sync.planning_axioms_of_impl_tasks tasks
+    |> Axioms_sync.apply_planning_context_budget ~total_budget:1200
+    |> List.hd
+  in
+  if String.length axiom.context > 1200
+  then failwith "expected planning context to respect budget" ;
+  if not (String.contains axiom.context '.')
+  then failwith "expected compacted planning context to contain an ellipsis marker"
+
 let () =
   expect_no_candidate_contradictions "NO_CONTRADICTIONS" ;
   expect_candidate_contradictions
@@ -89,4 +132,6 @@ let () =
 |} ;
   expect_satisfaction_invalid "0.82 maybe okay overall" ;
   expect_satisfaction_invalid
-    {|{"score": 1.4, "reason": "Score out of range should be rejected."}|}
+    {|{"score": 1.4, "reason": "Score out of range should be rejected."}|} ;
+  expect_planning_axiom_dedup () ;
+  expect_planning_budget_compacts ()

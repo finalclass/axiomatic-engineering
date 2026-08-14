@@ -25,7 +25,7 @@ let contradiction_block_marker = "END_CONTRADICTION"
 
 let excerpt text =
   let text = String.trim text in
-  if String.length text > 240 then String.sub text 0 240 ^ "..." else text
+  if String.length text > 1000 then String.sub text 0 1000 ^ "..." else text
 
 let contains text needle =
   let text_len = String.length text in
@@ -50,10 +50,12 @@ let classify_semantic_result result =
        details were provided by the model."
   else if String.starts_with ~prefix:"NO_CONTRADICTIONS" result
   then No_contradictions
-  else if String.starts_with ~prefix:"CONTRADICTION" result
-          && String.contains result '\n'
-          && String.contains result ':'
-          && contains result contradiction_block_marker
+  else if
+    (contains result "CONTRADICTION" && contains result "END_CONTRADICTION")
+    || String.starts_with ~prefix:"[" result
+    || String.starts_with ~prefix:"{" result
+    || contains result "```json"
+    || contains result "\"description\":"
   then Contradictions result
   else
     Invalid_response
@@ -63,8 +65,13 @@ let classify_semantic_result result =
          (excerpt result))
 
 let parse_candidate_ids text =
+  let line =
+    match String.index_opt text '\n' with
+    | Some i -> String.sub text 0 i
+    | None -> text
+  in
   let ids =
-    text
+    line
     |> String.split_on_char ','
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")

@@ -1,5 +1,6 @@
 module Config = Config
 module Consistency = Consistency
+module Types = Types
 
 let use_color () =
   Sys.getenv_opt "NO_COLOR" = None
@@ -13,7 +14,9 @@ let ansi code text =
   if use_color () then Printf.sprintf "\027[%sm%s\027[0m" code text else text
 
 let cyan text = ansi "36" text
+
 let bold text = ansi "1" text
+
 let dim text = ansi "2" text
 
 type validation_result =
@@ -30,6 +33,101 @@ type satisfaction_result =
 let excerpt text =
   let text = String.trim text in
   if String.length text > 240 then String.sub text 0 240 ^ "..." else text
+
+type planning_axiom =
+  { axiom_id: string
+  ; labels: string list
+  ; context: string }
+
+let planning_context_budget = 24_000
+
+let planning_context_note =
+  "[planning input truncated; inspect the axiom file directly with tools for \
+   full details]"
+
+let compact_planning_context ~max_chars text =
+  let text = String.trim text in
+  if String.length text <= max_chars
+  then text
+  else
+    let note = "\n\n" ^ planning_context_note in
+    let gap = "\n\n...\n" in
+    let note_len = String.length note in
+    let gap_len = String.length gap in
+    if max_chars <= note_len + gap_len + 32
+    then
+      String.sub
+        planning_context_note
+        0
+        (min (String.length planning_context_note) max_chars)
+    else
+      let available = max_chars - note_len - gap_len in
+      let head_len = available / 2 in
+      let tail_len = available - head_len in
+      let head = String.sub text 0 head_len in
+      let tail = String.sub text (String.length text - tail_len) tail_len in
+      head ^ gap ^ tail ^ note
+
+let planning_axioms_of_impl_tasks (impl_tasks : Types.task list) :
+    planning_axiom list =
+  let table : (string, planning_axiom) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (task : Types.task) ->
+      let label_name = task.label.name in
+      match Hashtbl.find_opt table task.axiom_id with
+      | None ->
+          Hashtbl.add
+            table
+            task.axiom_id
+            { axiom_id= task.axiom_id
+            ; labels= [label_name]
+            ; context= task.context }
+      | Some existing ->
+          let labels =
+            List.sort_uniq String.compare (label_name :: existing.labels)
+          in
+          let context =
+            if String.length task.context > String.length existing.context
+            then task.context
+            else existing.context
+          in
+          Hashtbl.replace table task.axiom_id {existing with labels; context} )
+    impl_tasks ;
+  Hashtbl.to_seq_values table
+  |> List.of_seq
+  |> List.sort (fun a b -> String.compare a.axiom_id b.axiom_id)
+
+let apply_planning_context_budget
+    ?(total_budget = planning_context_budget)
+    (axioms : planning_axiom list) : planning_axiom list =
+  let total_chars =
+    List.fold_left (fun acc axiom -> acc + String.length axiom.context) 0 axioms
+  in
+  if total_chars <= total_budget || axioms = []
+  then axioms
+  else
+    let per_axiom_budget = max 1200 (total_budget / List.length axioms) in
+    List.map
+      (fun axiom ->
+        { axiom with
+          context=
+            compact_planning_context ~max_chars:per_axiom_budget axiom.context
+        } )
+      axioms
+
+let render_planning_axioms (axioms : planning_axiom list) : string =
+  axioms
+  |> List.map (fun axiom ->
+      Fmt.str
+        {|
+          Axiom id: %s
+          Implementation labels: %s
+          Content:
+%s |}
+        axiom.axiom_id
+        (String.concat ", " axiom.labels)
+        axiom.context )
+  |> String.concat "\n\n"
 
 let substring_from text start =
   String.sub text start (String.length text - start)
@@ -60,7 +158,11 @@ let extract_from_marker text marker =
 let extract_first_json_object text =
   let len = String.length text in
   let rec find_start i =
-    if i >= len then None else if text.[i] = '{' then Some i else find_start (i + 1)
+    if i >= len
+    then None
+    else if text.[i] = '{'
+    then Some i
+    else find_start (i + 1)
   in
   let rec find_end i depth in_string escaped =
     if i >= len
@@ -68,14 +170,21 @@ let extract_first_json_object text =
     else
       let ch = text.[i] in
       if in_string
-      then if escaped then find_end (i + 1) depth true false
-      else if ch = '\\' then find_end (i + 1) depth true true
-      else if ch = '"' then find_end (i + 1) depth false false
-      else find_end (i + 1) depth true false
-      else if ch = '"' then find_end (i + 1) depth true false
-      else if ch = '{' then find_end (i + 1) (depth + 1) false false
+      then
+        if escaped
+        then find_end (i + 1) depth true false
+        else if ch = '\\'
+        then find_end (i + 1) depth true true
+        else if ch = '"'
+        then find_end (i + 1) depth false false
+        else find_end (i + 1) depth true false
+      else if ch = '"'
+      then find_end (i + 1) depth true false
+      else if ch = '{'
+      then find_end (i + 1) (depth + 1) false false
       else if ch = '}'
-      then if depth = 1 then Some i else find_end (i + 1) (depth - 1) false false
+      then
+        if depth = 1 then Some i else find_end (i + 1) (depth - 1) false false
       else find_end (i + 1) depth false false
   in
   match find_start 0 with
@@ -95,8 +204,7 @@ let classify_validation_result raw =
     else extract_from_marker result "ISSUES:"
   in
   match normalized with
-  | Some "NO ISSUES" ->
-      Validation_pass
+  | Some "NO ISSUES" -> Validation_pass
   | Some issues when String.starts_with ~prefix:"ISSUES:" issues ->
       Validation_issues issues
   | _ ->
@@ -134,15 +242,12 @@ let classify_satisfaction_result raw =
 
 let section title =
   Fmt.pr
-    "%s\n\
-     %s\n\
-     %s\n\
-     @."
+    "%s\n%s\n%s\n@."
     (dim
-       "────────────────────────────────────────────────────────────────────────────────────────────────────")
+       "────────────────────────────────────────────────────────────────────────────────────────────────────" )
     (bold (cyan title))
     (dim
-       "────────────────────────────────────────────────────────────────────────────────────────────────────")
+       "────────────────────────────────────────────────────────────────────────────────────────────────────" )
 
 let add_cost ~(total_cost : float ref) (response : Types.ai_response) =
   total_cost := !total_cost +. response.cost ;
@@ -168,7 +273,7 @@ let classify_plan_result raw =
   let lower = String.lowercase_ascii text in
   let looks_like_greeting =
     String.length lower < 240
-    && (String.starts_with ~prefix:"hello" lower
+    && ( String.starts_with ~prefix:"hello" lower
        || String.starts_with ~prefix:"hi" lower
        || String.starts_with ~prefix:"cze" lower )
   in
@@ -211,15 +316,9 @@ let planning_phase
     ~impl_tasks =
   let tasks_str =
     impl_tasks
-    |> List.map (fun (task : Types.task) ->
-        Fmt.str
-          {|
-          Axiom id: %s
-          Content:
-%s |}
-          task.axiom_id
-          task.context )
-    |> String.concat "\n\n"
+    |> planning_axioms_of_impl_tasks
+    |> apply_planning_context_budget
+    |> render_planning_axioms
   in
   let system_prompt =
     let p = tool_base_dir in
@@ -250,6 +349,10 @@ let planning_phase
            with %s/"
           p
           p
+      ; ""
+      ; "The axiom excerpts in the prompt may be truncated for context budget \
+         reasons. If anything looks shortened or incomplete, read the full \
+         axiom files with tools before planning."
       ; ""
       ; "Do NOT guess or invent paths. Use the tools to explore the directory \
          structure first."
@@ -298,8 +401,7 @@ let planning_phase
           if attempt < 3
           then (
             Fmt.pr
-              "Planning attempt %d/3 returned an invalid response, retrying: \
-               %s\n\
+              "Planning attempt %d/3 returned an invalid response, retrying: %s\n\
                %!"
               attempt
               msg ;
@@ -384,6 +486,7 @@ let validation_phase
                   attempt
                   msg ;
                 Unix.sleepf (0.75 *. float_of_int attempt) ;
+
                 run_with_retry (attempt + 1) (Some msg) )
               else failwith msg
       in
@@ -464,17 +567,17 @@ let run_one_satisfaction_task
              ( match last_error with
              | None -> ""
              | Some err -> Fmt.str " Last error: %s" err ) )
-	      else
-	        let raw =
-	          Ai_access.prompt
-	            ~system_prompt
-	            ~user_prompt
-	            ~model
-	            ~stream_output:false
-	            ?api_key
-	            ()
-	          |> prompt_result ~total_cost
-	        in
+      else
+        let raw =
+          Ai_access.prompt
+            ~system_prompt
+            ~user_prompt
+            ~model
+            ~stream_output:false
+            ?api_key
+            ()
+          |> prompt_result ~total_cost
+        in
         match classify_satisfaction_result raw with
         | Satisfaction_ok {score; reason} -> (score, reason)
         | Satisfaction_invalid msg ->

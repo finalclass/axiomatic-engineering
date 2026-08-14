@@ -64,12 +64,13 @@ let load_impl ?(project_path = ".") () : Types.config =
         match get_string_opt merged ["axiom"] with
         | Some axiom -> `Specific [axiom]
         | None -> `Diff ) )
-  ; planner= get_string merged ["planner"] "deepseek-v3.2"
-  ; semantic= get_string merged ["semantic"] "k2.5"
-  ; implementer= get_string merged ["implementer"] "m2.7"
-  ; smart= get_string merged ["smart"] "m2.7"
-  ; balanced= get_string merged ["balanced"] "m2.7"
-  ; fast= get_string merged ["fast"] "k2.5"
+  ; planner= get_string merged ["planner"] "google/gemini-3-flash-preview"
+  ; semantic= get_string merged ["semantic"] "google/gemini-3-flash-preview"
+  ; implementer=
+      get_string merged ["implementer"] "google/gemini-3-flash-preview"
+  ; smart= get_string merged ["smart"] "google/gemini-3-flash-preview"
+  ; balanced= get_string merged ["balanced"] "google/gemini-3-flash-preview"
+  ; fast= get_string merged ["fast"] "google/gemini-3-flash-preview"
   ; vision= get_string merged ["vision"] "google/gemini-3-flash-preview"
   ; preprompt= get_string merged ["preprompt"] ""
   ; max_cycles= get_int merged ["max_cycles"] 3

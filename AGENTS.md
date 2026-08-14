@@ -17,3 +17,6 @@ Recent history uses short imperative subjects such as `Add AI tool presets and i
 
 ## Configuration Notes
 This project targets OCaml 5.4+ and Dune 3.17 (`dune-project`). The `well` package is pinned from Git, so avoid changing dependency sources casually and regenerate locks when dependencies move.
+
+## Agent Runtime Rules
+Do not add or reintroduce hard limits on AI tool-use rounds or agent iteration count as a workaround for context-growth bugs. If long-running planning or implementation workflows hit context problems, fix context management or resumption logic instead of stopping the agent after an arbitrary number of tool calls.
