@@ -1,4 +1,0 @@
-(executable
- (name main)
- (public_name axioms-sync)
- (libraries axioms_sync eio_main tls-eio ca-certs mirage-crypto-rng.unix))

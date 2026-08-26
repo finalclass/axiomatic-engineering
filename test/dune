@@ -1,4 +1,0 @@
-(test
- (name axioms_sync_test)
- (libraries axioms_sync well.test)
- (deps (source_tree %{workspace_root}/example)))
