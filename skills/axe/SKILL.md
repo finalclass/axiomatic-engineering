@@ -1,6 +1,6 @@
 ---
 name: axe
-description: Spec-anchored development. Human-authored docs/ is the source of truth; code is derived. Two entry points — (1) a chat request goes through spec first (write docs, then STOP), (2) "axe sync" / "zsynchronizuj" diffs docs against .axe/freeze and implements that delta. Use whenever the user mentions axe, sync, docs, SDD, STP, contracts, architecture, or asks to change lib/ or test/.
+description: Spec-anchored development. Human-authored docs/ is the source of truth; code is derived. Two entry points — (1) a chat request goes through spec first (write docs, then STOP), (2) "axe sync" / "zsynchronizuj" or "rąbiemy" (from axe - siekiera). diffs docs against .axe/freeze and implements that delta. Use whenever the user mentions axe, sync, docs, SDD, STP, contracts, architecture, or asks to change lib/ or test/.
 ---
 
 # axe — Spec-Anchored Development
@@ -38,7 +38,7 @@ Defined **only** in `docs/main.md`. A spec file may attach a name (`[look]`) und
 |---|---|---|
 | `[impl]` | `@implementation +code` | Bring code in line with the changed spec |
 | `[contract]` | `@implementation @validation +code` | Project `sdd.toml` → `lib/contract/` and compile |
-| `[test]` | `@implementation @validation +code` | Write / update tests from STP + use cases |
+| `[test]` | `@implementation @validation +code` | Write / update tests **only** from STP (and headings labeled `[test]`). Never from implementation, use cases, or a generic “code needs tests” rule |
 | `[look]` | `@validation +browser` | Compare running UI to the mockup at the same viewport |
 
 Defaults when a file has no label: `sdd.toml` → `[contract]`; `stp.md` → `[test]`; `*_page.md` / `*.tag.md` / `docs/mockup/screens/*` → `[impl] [look]`; `sdd.md` / `types.md` / `methods/*.md` / `arch.md` / `DESIGN.md` → `[impl]`.
@@ -184,13 +184,13 @@ Write this to `.axe/last-sync.md`. Then implement — the architect already appr
 
 You are a full agent on derived code: infer and close the implementation so it matches docs. Do not leave the delta half-done.
 
-Only the delta. Follow IDesign. Project TOML when `[contract]`. Write tests when `[test]`. Add `@doc path/to.md` markers **only** when one code file realizes several docs (coarse regions). Do not wrap every block. Do not comment OCaml to explain domain — that lives in the spec.
+Only the delta. Follow IDesign. Project TOML when `[contract]`. Write or update tests **only** when `[test]` — never alongside `[impl]` / `[contract]` / `[look]`. Add `@doc path/to.md` markers **only** when one code file realizes several docs (coarse regions). Do not wrap every block. Do not comment OCaml to explain domain — that lives in the spec.
 
 Do not modify `docs/` during sync unless `tokens.css` must be regenerated from DESIGN.md (derived). If a spec is unrealizable, stop and report.
 
 #### Step 5 — Verify
 
-Run what the labels require. `[look]`: same viewport (default 1440×900), screenshot mockup and running app, compare layout / type / color / states. Fail on a clear miss; do not require bitwise PNG identity (font hinting, scrollbars).
+Run what the labels require. `[look]`: same viewport (default 1440×900), screenshot mockup and running app, compare layout / type / color / states. Fail on a clear miss; do not require bitwise PNG identity (font hinting, scrollbars). `[test]`: run the STP-derived tests you wrote or updated. Without `[test]`, do not add tests to make a suite green.
 
 Failures → fix from the error description, still without changing docs. Repeat until checks pass or you must escalate a spec hole.
 
@@ -237,7 +237,7 @@ Same Role / boundary. Contract is Attrs, Emits, Use cases (verbs). **No State, n
 
 ## What goes in `stp.md`
 
-Critical behaviors, collaborator substitution plan, endpoint modes if any, what is explicitly not tested here. Strategy is human; test code is derived.
+Critical behaviors, collaborator substitution plan, endpoint modes if any, what is explicitly not tested here. Strategy is human; test code is derived. No STP scenario = no new test code. Do not fill that gap from use cases or from the implementation.
 
 ## What goes in `docs/arch.md`
 
