@@ -120,6 +120,12 @@ If asked to describe something in `docs/`, write **at most one short sentence**.
 
 The architect **already** changed `docs/`. You do not invent scope from chat. You compute the delta against freeze and implement that.
 
+#### Execution configuration
+
+Read optional **`<project-root>/axe.toml`** before sync. It is versioned execution configuration, outside `docs/` and the snapshots; changing it does not create an application delta. No file means local execution by the current agent, as before.
+
+When present, read [execution configuration and delegation](references/execution.md). The current agent is the orchestrator; neither its model nor a worker model is hardcoded in this skill. Delegated execution starts only after Steps 0–3 establish a consistent delta. Workers implement assigned tasks; only the orchestrator integrates results, performs final verification, and updates freeze. A worker assignment is not an instruction to start another `axe sync`.
+
 #### Step 0 — Snapshot
 
 Text files from `docs/` (`*.md`, `*.toml`, `*.html`, `*.css`) → `.axe/current/` (wipe the folder first, keep relative paths).
@@ -183,6 +189,8 @@ Write this to `.axe/last-sync.md`. Then implement — the architect already appr
 #### Step 4 — Implement
 
 You are a full agent on derived code: infer and close the implementation so it matches docs. Do not leave the delta half-done.
+
+For delegated execution, follow [the service task protocol](references/execution.md): give each affected service a separate worker session with a bounded task, then review the actual changes. Keep shared contract projection and integration explicitly owned by the orchestrator. Delegation does not change the spec gates, label rules, or success criteria below.
 
 Only the delta. Follow IDesign. Project TOML when `[contract]`. Write or update tests **only** when `[test]` — never alongside `[impl]` / `[contract]` / `[look]`. Add `@doc path/to.md` markers **only** when one code file realizes several docs (coarse regions). Do not wrap every block. Do not comment OCaml to explain domain — that lives in the spec.
 
