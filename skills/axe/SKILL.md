@@ -103,6 +103,8 @@ You are a text editor on `docs/`. Never write those files first.
    does not approve an unshown docs edit. Approving a description
    you never patched does not count.
 3. Write **only** the accepted lines. Do not add beyond the diff.
+   When this write is committed, tag tracker issues (see **Tracker
+   issues in commits**).
 4. Do not implement. Do not test. Do not start `axe sync` on your own.
    Approving docs is **not** a signal to code. **Stop.**
 5. Code starts only when the architect says `axe sync` / „zsynchronizuj”.
@@ -213,7 +215,29 @@ mv .axe/current .axe/freeze
 
 A failed sync leaves freeze untouched so the next run sees the same delta.
 
-`.axe/current/` is scratch (gitignore). `.axe/freeze/` is the last successful docs snapshot (text + ASSETS). Commit freeze if the project does; never commit PNG copies.
+`.axe/current/` is scratch (gitignore). `.axe/freeze/` is the last successful docs snapshot (text + ASSETS). Commit freeze if the project does; never commit PNG copies. That commit lists harvested issue tags (see **Tracker issues in commits**).
+
+## Tracker issues in commits
+
+Format: `#<n>` — the tracker-local id (Forgejo or any issue store). Take
+`n` from the conversation (number, URL, user). Do not invent. No issue
+in context → no tag. Write `#<n>` only; do not add `Fixes` / `Closes`.
+
+**Spec.** The commit that records an accepted `docs/` write in an
+issue-scoped chat includes that `#<n>`.
+
+**Sync.** After freeze, find the last successful sync in git history,
+then list every issue this delta implemented in code:
+
+1. Last sync = latest commit that changed `.axe/freeze`. If freeze is
+   not in git, latest commit whose subject starts with `axe sync:`.
+   None → do not walk the whole history; keep only issue ids from this
+   chat, if any.
+2. `git log --no-merges --format='%s%n%b' <last-sync>..HEAD`. Collect
+   unique `#<digits>` in first-seen order. Add any issue ids from this
+   chat that are missing from that list.
+3. Put those ids in the sync commit message. If freeze is not
+   committed, start the subject with `axe sync:`.
 
 ## Before you touch code
 
@@ -282,7 +306,7 @@ Client → Manager → Engine → Access → Resource (+ Utility). Manager ↛ M
 ## Worked examples
 
 **Chat:** "Add FileManager.ArchiveClosedCases."
-Diagnosis (one line) → unified diff of SDD + toml + assumption + STP (no prose of the edit) → wait → write spec → **STOP**.
+Diagnosis (one line) → unified diff of SDD + toml + assumption + STP (no prose of the edit) → wait → write spec → **STOP**. If the chat is a tracker issue, the spec commit includes `#12`.
 
 **Sync:** architect says `axe sync` (or already edited `docs/`).
-`axe sync` → diff vs freeze → change list → implement matching UI/code → `[look]` in the browser → freeze.
+`axe sync` → diff vs freeze → change list → implement matching UI/code → `[look]` in the browser → freeze. The sync commit lists `#12 #18` harvested from commits since last freeze.
