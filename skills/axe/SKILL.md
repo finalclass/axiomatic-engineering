@@ -81,11 +81,21 @@ Before presenting or saving the proposal:
   artifact must be necessary for that outcome; keep optional improvements outside
   the proposal. An existing requirement violated by code is an implementation
   defect, not a reason to add the same requirement to the spec.
+- When connecting existing functionality, start with calls to the existing
+  mechanism in the owning use-case diagrams. Before adding a contract parameter,
+  persistent field, separate specification document or error-handling mechanism,
+  identify the requested or already binding requirement that existing elements
+  cannot satisfy and explain that limitation. A hypothetical edge case alone
+  does not justify expanding the scope. Review this necessity before checking
+  the internal consistency of the expanded design.
 - Define each rule once in its owning artifact. The use-case diagram owns the
   procedure; prose adds only information absent from it. Link to existing rules
   instead of restating them in SDD or arch.md. Architecture owns cross-service
   structure and system workflows, not local method behavior. A pattern or type
   need not be repeated as an enumeration of its implications.
+- When the requested artifact is a template, provide the concrete template in
+  its owning specification rather than prose instructions for constructing it.
+  Explain only semantics that the artifact itself does not express.
 - Check responsibility ownership as well as call edges. Transport and presentation
   behavior belongs to the relevant adapter; dependency contracts preserve their
   abstraction boundary. For example, download response headers belong to the HTTP
