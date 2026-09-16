@@ -11,6 +11,20 @@ Start every session that might touch the system by reading `docs/main.md` (label
 
 ## The binding artifacts
 
+### Project compatibility
+
+Explicit project conventions take precedence over the legacy layouts below.
+When the project authors contracts as TOML fences in Markdown, read its SDD index,
+linked flat RPC files and shared types. Parse and semantically merge the affected
+service's fences into the generated contract TOML; reject conflicting keys,
+duplicate type definitions and unresolved references. Do not create `sdd.toml`
+or migrate back to it. Projection is triggered by changed contract fences even
+when the project does not define a `[contract]` label.
+
+When the project explicitly selects direct spec editing for Git/T3 review, write
+requested specification edits directly and stop. This overrides the proposal
+gate below, but never authorizes implementation without an explicit sync request.
+
 | Artifact | Location | What it captures |
 |---|---|---|
 | `docs/main.md` | `docs/` | System map: **label definitions**, links to arch and mockup. Not the architecture itself. |
@@ -130,7 +144,14 @@ When present, read [execution configuration and delegation](references/execution
 
 #### Step 0 — Snapshot
 
-Text files from `docs/` (`*.md`, `*.toml`, `*.html`, `*.css`) → `.axe/current/` (wipe the folder first, keep relative paths).
+Before implementation, run the project's documented tool readiness target (for
+DG: `make tools-check`). Resolve tools from project instructions and Makefile;
+do not repeatedly search the web or package tree for installed executables.
+Missing/broken tools block implementation until repaired. Do not silently skip
+formatting or substitute an unverified formatter. Environment repair time is
+reported separately from sync time.
+
+Text files from `docs/` (`*.md`, `*.toml`, `*.html`, `*.css`, `*.js`, `*.json`) → `.axe/current/` (wipe the folder first, keep relative paths). Parse JSON. When an older freeze hashes text as an asset, compare its content hash before treating the representation change as product work.
 
 Binaries (png, jpg, svg, …): do **not** copy. Append `sha256  relative/path` lines to `.axe/current/ASSETS`.
 
@@ -163,7 +184,7 @@ If the set is empty, stop. Nothing to implement.
 #### Step 2 — Consistency
 
 - Every link in the changed files resolves.
-- `sdd.toml` matches the SDD Contract section it belongs to.
+- Authored contracts match their SDD (use Project compatibility for Markdown contracts).
 - Labels used on files exist in `docs/main.md`.
 - New color / new control kind on a mockup screen is declared in `DESIGN.md` (no raw hex that already has a token).
 - `docs/mockup/tokens.css` still matches DESIGN.md if DESIGN.md changed — update the projection, do not edit tokens.css as a source.
@@ -199,6 +220,16 @@ Only the delta. Follow IDesign. Project TOML when `[contract]`. Write or update 
 Do not modify `docs/` during sync unless `tokens.css` must be regenerated from DESIGN.md (derived). If a spec is unrealizable, stop and report.
 
 #### Step 5 — Verify
+
+Use the project's make targets for build/test/format operations where required.
+Record exact commands, exit codes and log paths. Required formatting must actually
+run; visual resemblance to the formatter's style is not evidence. Missing tools,
+failed required checks or unresolved test failures mean sync is not verified:
+leave freeze unchanged. Calling a failure pre-existing requires baseline evidence
+and does not itself waive the project's acceptance requirements.
+
+Record elapsed time for planning, contracts, implementation, verification and
+environment repair, plus total wall time in `.axe/last-sync.md`.
 
 Run what the labels require. `[look]`: same viewport (default 1440×900), screenshot mockup and running app, compare layout / type / color / states. Fail on a clear miss; do not require bitwise PNG identity (font hinting, scrollbars). `[test]`: run the STP-derived tests you wrote or updated. Without `[test]`, do not add tests to make a suite green.
 
