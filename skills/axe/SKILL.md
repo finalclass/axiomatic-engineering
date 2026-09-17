@@ -187,12 +187,11 @@ When present, read [execution configuration and delegation](references/execution
 
 #### Step 0 — Snapshot
 
-Before implementation, run the project's documented tool readiness target (for
-DG: `make tools-check`). Resolve tools from project instructions and Makefile;
-do not repeatedly search the web or package tree for installed executables.
-Missing/broken tools block implementation until repaired. Do not silently skip
-formatting or substitute an unverified formatter. Environment repair time is
-reported separately from sync time.
+Resolve tools from project instructions and Makefile; do not probe the
+toolchain on every sync. Do not repeatedly search the web or package tree
+for installed executables. Missing/broken tools block implementation until
+repaired. Do not silently skip formatting or substitute an unverified
+formatter. Environment repair time is reported separately from sync time.
 
 Text files from `docs/` (`*.md`, `*.toml`, `*.html`, `*.css`, `*.js`, `*.json`) → `.axe/current/` (wipe the folder first, keep relative paths). Parse JSON. When an older freeze hashes text as an asset, compare its content hash before treating the representation change as product work.
 
