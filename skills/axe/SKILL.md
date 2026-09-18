@@ -121,7 +121,9 @@ not a description of hunks. The patch is the proposal. A plan is not.
   intended edits, then "ok?". That is not a proposal. No hunks on screen
   = you have not proposed. Do not ask the architect to approve a
   description.
-- One diagnosis line (artifact + section) may sit above the fence.
+- A brief diagnosis may sit above the fence: name the artifact and section,
+  explain the problem and why the proposed change addresses it. Use complete
+  sentences; do not impose a line limit or repeat the diff in prose.
   Completeness questions may sit after it. After that: stop.
 
 ## Two entry points
@@ -133,7 +135,7 @@ below. For project-selected direct spec editing, use the direct-write mode above
 
 The architect has **not** yet edited the spec. Do **not** write code.
 
-1. **Diagnosis** — one line: artifact + section the request belongs to (SDD method, arch edge, mockup screen, DESIGN.md token, STP note). If it maps nowhere, say so. For a backend change: read that service’s SDD Contract and `docs/arch.md` first; decide whether the contract must move or only implementation. Do **not** read the service’s code until that strategy is set (zoom-in).
+1. **Diagnosis** — briefly identify the artifact and section the request belongs to (SDD method, arch edge, mockup screen, DESIGN.md token, STP note), and explain the relevant problem in complete sentences. If it maps nowhere, say so. For a backend change: read that service’s SDD Contract and `docs/arch.md` first; decide whether the contract must move or only implementation. Do **not** read the service’s code until that strategy is set (zoom-in).
 2. **Completeness** — verify the affected signature, use case, assumptions and STP coverage, and coherence with architecture and visual contracts. Existing content and coverage count; completeness does not require adding text or touching every artifact. Raise genuine gaps without inventing requirements.
 3. **Propose** — the unified diff of the necessary specification changes (see **Docs proposal**). Do not edit `docs/` in this turn. End the turn.
 4. **Coherence** — state that the touched artifacts agree. Wait for explicit "ok" / "approve" / "go" **of those hunks**.
