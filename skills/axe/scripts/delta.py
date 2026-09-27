@@ -17,7 +17,7 @@ MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 HREF = re.compile(r"""href=["']([^"']+)["']""", re.I)
 FENCE = re.compile(r"```toml\s*\n(.*?)```", re.S)
 BUILTIN_PHASE = "impl"
-SCREEN_PREFIX = "docs/mockup/screens/"
+SCREEN_PREFIX = "mockup/screens/"
 
 
 def sha256(path: Path) -> str:
@@ -160,7 +160,7 @@ def screen_links(text: str) -> list[str]:
         clean = target.split("#", 1)[0].split("?", 1)[0]
         if clean.endswith(".html") and "mockup/screens/" in clean:
             name = clean.split("mockup/screens/", 1)[1]
-            rel = SCREEN_PREFIX + name
+            rel = "docs/" + SCREEN_PREFIX + name
             if rel not in found:
                 found.append(rel)
     return found
@@ -216,11 +216,25 @@ def main() -> int:
     current = root / ".axe" / "current"
     freeze = root / ".axe" / "freeze"
     report_path = root / ".axe" / "delta-report.md"
+    config_path = root / "axe.toml"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        review = config.get("workflow", {}).get("review", "default")
+        if review not in {"default", "operators"}:
+            raise ValueError(f"unsupported workflow.review: {review}")
+    except (tomllib.TOMLDecodeError, ValueError) as error:
+        print(f"invalid axe.toml: {error}", file=sys.stderr)
+        return 1
+    operator_review = review == "operators"
     if not docs.is_dir():
         print("no docs/ directory", file=sys.stderr)
         return 1
     snapshot(docs, current)
     if not freeze.exists():
+        if operator_review:
+            write_report(report_path, "baseline", "Verified implementation baseline is missing. Freeze was not created. Stop.\n")
+            print("status: baseline")
+            return 2
         shutil.copytree(current, freeze)
         write_report(
             report_path,
@@ -271,7 +285,8 @@ def main() -> int:
                 json.loads(text)
             except json.JSONDecodeError as error:
                 contradictions.append(f"invalid JSON {rel}: {error}")
-        contradictions.extend(links_resolve(docs, rel, text))
+        if not operator_review:
+            contradictions.extend(links_resolve(docs, rel, text))
         old_fences = fences(old)
         new_fences = fences(text)
         if old_fences != new_fences:
@@ -309,7 +324,7 @@ def main() -> int:
             else:
                 tests.append(rel)
         if "look" in labels:
-            nearby = []
+            nearby = [f"docs/{rel}"] if rel.startswith(SCREEN_PREFIX) and rel.endswith(".html") else []
             for line_no in sorted(changed_lines):
                 for screen in screen_links(innermost(line_no)):
                     if screen not in nearby:
@@ -317,11 +332,13 @@ def main() -> int:
             for screen in nearby:
                 if screen not in look:
                     look.append(screen)
-        if rel.startswith(SCREEN_PREFIX) and rel.endswith(".html") and not owning_page(docs, rel):
+        if not operator_review and rel.startswith(SCREEN_PREFIX) and rel.endswith(".html") and not owning_page(docs, rel):
             contradictions.append(f"no owning page or tag for {rel}")
 
     for rel in deleted:
         file_labels[rel] = set()
+        if fences(old_text[rel].read_text(encoding="utf-8")):
+            contract = True
 
     if contradictions:
         body = ["## Contradictions"]
@@ -350,7 +367,9 @@ def main() -> int:
     else:
         lines.append("- none")
     lines.append("")
-    lines.append("## Look")
+    lines.append("## Tester handoff" if operator_review else "## Look")
+    if operator_review:
+        lines.append("- visual acceptance: pending when the issue affects UI; never performed by implementer")
     if look:
         lines.extend(f"- {item}" for item in look)
         lines.append("- viewports: 1440×900, 390×844")
@@ -365,7 +384,7 @@ def main() -> int:
     lines.append("- format only derived files this delta changes")
     if tests:
         lines.append("- run only the tests written for the headings under Tests to write")
-    if look:
+    if look and not operator_review:
         lines.append("- compare the Look screens to the running app at the listed viewports")
     if contract:
         lines.append("- project contract build for the changed fences")

@@ -9,6 +9,16 @@ This repository works in **spec-anchored development**. Human-authored artifacts
 
 Start every session that might touch the system by reading `docs/main.md` (labels + map), then the artifacts that file points at.
 
+## Project-selected operator workflow
+
+When `axe.toml` selects `[workflow] review = "operators"`, first read
+[operator review and execution](references/operator-workflow.md). That mode
+assigns specification inspection, implementation and visual acceptance to separate
+roles, permits a bounded implementation-only repair, and defines automation-only
+freeze semantics. Its role boundaries and entry points override the generic
+discovery, review and sync instructions below. Other projects keep their existing
+workflow.
+
 ## The binding artifacts
 
 Project instructions select the contract format and review mode. For projects
